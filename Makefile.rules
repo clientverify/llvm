@@ -639,7 +639,12 @@ endif
 ifndef NO_PEDANTIC
 CompileCommonOpts += -pedantic -Wno-long-long
 endif
-CompileCommonOpts += -Wall -W -Wno-unused-parameter -Wwrite-strings \
+
+ifndef NO_WEXTRA
+CompileCommonOpts += -Wextra
+endif
+
+CompileCommonOpts += -Wall -Wno-unused-parameter -Wwrite-strings \
                      $(EXTRA_OPTIONS)
 
 ifeq ($(HOST_OS),HP-UX)
