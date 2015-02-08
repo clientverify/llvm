@@ -52,6 +52,31 @@ static void SetValue(Value *V, GenericValue Val, ExecutionContext &SF) {
   SF.Values[V] = Val;
 }
 
+static void PrintGenericValue(const GenericValue &val, Type* ty, raw_fd_ostream* out) {
+  if (out) {
+    if (PrintGVTypeOnly) {
+      switch (ty->getTypeID()) {
+        case Type::IntegerTyID: *out << "[int] "; break;
+        case Type::FloatTyID:   *out << "[float] "; break;
+        case Type::DoubleTyID:  *out << "[double] "; break;
+        case Type::PointerTyID: *out << "[ptr] "; break;
+        case Type::VoidTyID:    *out << "[void] "; break;
+        default: *out << "[type error] "; break;
+      }
+    } else {
+      switch (ty->getTypeID()) {
+        case Type::IntegerTyID: *out << "[int] " << *(val.IntVal.getRawData()); break;
+        case Type::FloatTyID:   *out << "[float] " << val.FloatVal; break;
+        case Type::DoubleTyID:  *out << "[double] " << val.DoubleVal; break;
+        case Type::PointerTyID: *out << "[ptr] " << val.PointerVal; break;
+        case Type::VoidTyID:    *out << "[void] "; break;
+        default: *out << "[type error] "; break;
+      }
+    }
+  }
+}
+
+
 //===----------------------------------------------------------------------===//
 //                    Binary Instruction Implementations
 //===----------------------------------------------------------------------===//
@@ -2155,7 +2180,32 @@ void Interpreter::callFunction(Function *F,
       }
     }
 
+    // Optional logging of external calls
+    if (ExtFuncLog) {
+      *ExtFuncLogFile << F->getName().str() << "( ";
+      unsigned ArgNo = 0;
+      const unsigned NumArgs = ArgTypes.size();
+      for (std::vector<Type*>::const_iterator Ty=ArgTypes.begin(),
+           TyEnd=ArgTypes.end(); Ty != TyEnd; ++Ty, ++ArgNo) {
+        Type *ArgTy = *Ty;
+        PrintGenericValue(ArgVals[ArgNo], ArgTy, ExtFuncLogFile);
+
+        if (ArgNo+1 < NumArgs)
+          *ExtFuncLogFile << ", ";
+      }
+      *ExtFuncLogFile << " ) ";
+
+      if (F->isVarArg())
+        *ExtFuncLogFile << " [vaarg] ";
+    }
+
     GenericValue Result = callExternalFunction (F, ArgVals, ArgTypes);
+
+    if (ExtFuncLog) {
+      *ExtFuncLogFile << " -> ";
+      PrintGenericValue(Result, F->getReturnType(), ExtFuncLogFile);
+      *ExtFuncLogFile << "\n";
+    }
 
     // Simulate a 'ret' instruction of the appropriate type.
     popStackAndReturnValueToCaller (F->getReturnType (), Result);

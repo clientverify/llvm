@@ -17,8 +17,38 @@
 #include "llvm/CodeGen/IntrinsicLowering.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
 #include <cstring>
 using namespace llvm;
+
+raw_fd_ostream *ExtFuncLogFile = NULL;
+
+cl::opt<bool> ExtFuncLog("interpreter-ext-log",
+  cl::desc("log all external calls"));
+
+cl::opt<std::string> ExtFuncLogFileName("interpreter-ext-log-file-name",
+  cl::init("lli_external_calls.log"),
+  cl::desc("file name for logging of external calls"));
+
+
+static raw_fd_ostream *openOutputFile(const std::string &filename) {
+  raw_fd_ostream *f;
+  std::string Error;
+  SmallString<128> directory("./");
+  SmallString<128> path = directory;
+  sys::path::append(path,filename);
+
+  f = new raw_fd_ostream(path.c_str(), Error, sys::fs::F_Binary);
+
+  if (!Error.empty()) {
+    report_fatal_error("openOutputFile failed.");
+    delete f;
+    f = NULL;
+  }
+  return f;
+}
 
 namespace {
 
@@ -55,10 +85,15 @@ Interpreter::Interpreter(Module *M)
   emitGlobals();
 
   IL = new IntrinsicLowering(TD);
+
+  if (ExtFuncLog)
+    ExtFuncLogFile = openOutputFile(ExtFuncLogFileName);
 }
 
 Interpreter::~Interpreter() {
   delete IL;
+  if (ExtFuncLogFile)
+    delete ExtFuncLogFile;
 }
 
 void Interpreter::runAtExitHandlers () {
