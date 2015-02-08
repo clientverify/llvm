@@ -2140,6 +2140,11 @@ void Interpreter::callFunction(Function *F,
   assert((ECStack.empty() || ECStack.back().Caller.getInstruction() == 0 ||
           ECStack.back().Caller.arg_size() == ArgVals.size()) &&
          "Incorrect number of arguments passed into function call!");
+  if (PrintFunctionCalls) {
+    std::string tabs(ECStack.size(), ' ');
+    errs() << tabs << "F: " << F->getName() << "\n";
+  }
+
   // Make a new stack frame... and fill it in.
   ECStack.push_back(ExecutionContext());
   ExecutionContext &StackFrame = ECStack.back();
