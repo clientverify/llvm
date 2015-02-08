@@ -506,11 +506,11 @@ void Interpreter::initializeExternalFunctions() {
   FuncNames["lle_X_exit"]         = lle_X_exit;
   FuncNames["lle_X_abort"]        = lle_X_abort;
 
-  FuncNames["lle_X_printf"]       = lle_X_printf;
-  FuncNames["lle_X_sprintf"]      = lle_X_sprintf;
-  FuncNames["lle_X_sscanf"]       = lle_X_sscanf;
-  FuncNames["lle_X_scanf"]        = lle_X_scanf;
-  FuncNames["lle_X_fprintf"]      = lle_X_fprintf;
+  //FuncNames["lle_X_printf"]       = lle_X_printf;
+  //FuncNames["lle_X_sprintf"]      = lle_X_sprintf;
+  //FuncNames["lle_X_sscanf"]       = lle_X_sscanf;
+  //FuncNames["lle_X_scanf"]        = lle_X_scanf;
+  //FuncNames["lle_X_fprintf"]      = lle_X_fprintf;
   FuncNames["lle_X_memset"]       = lle_X_memset;
   FuncNames["lle_X_memcpy"]       = lle_X_memcpy;
 }
