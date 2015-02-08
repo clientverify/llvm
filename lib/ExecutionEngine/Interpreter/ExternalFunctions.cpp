@@ -180,37 +180,33 @@ static void *ffiValueFor(Type *Ty, const GenericValue &AV,
 
 static bool ffiInvoke(RawFunc Fn, Function *F,
                       const std::vector<GenericValue> &ArgVals,
+                      const std::vector<Type*> &ArgTypes,
                       const DataLayout *TD, GenericValue &Result) {
   ffi_cif cif;
   FunctionType *FTy = F->getFunctionType();
-  const unsigned NumArgs = F->arg_size();
-
-  // TODO: We don't have type information about the remaining arguments, because
-  // this information is never passed into ExecutionEngine::runFunction().
-  if (ArgVals.size() > NumArgs && F->isVarArg()) {
-    report_fatal_error("Calling external var arg function '" + F->getName()
-                      + "' is not supported by the Interpreter.");
-  }
+  const unsigned NumArgs = ArgTypes.size();
+  const unsigned NumFixedArgs = F->arg_size();
 
   unsigned ArgBytes = 0;
 
   std::vector<ffi_type*> args(NumArgs);
-  for (Function::const_arg_iterator A = F->arg_begin(), E = F->arg_end();
-       A != E; ++A) {
-    const unsigned ArgNo = A->getArgNo();
-    Type *ArgTy = FTy->getParamType(ArgNo);
-    args[ArgNo] = ffiTypeFor(ArgTy);
-    ArgBytes += TD->getTypeStoreSize(ArgTy);
+
+  unsigned ArgNo =0;
+  for (std::vector<Type*>::const_iterator Ty=ArgTypes.begin(), TyEnd=ArgTypes.end();
+       Ty != TyEnd; ++Ty, ++ArgNo) {
+    args[ArgNo] = ffiTypeFor(*Ty);
+    ArgBytes += TD->getTypeStoreSize(*Ty);
   }
 
   SmallVector<uint8_t, 128> ArgData;
   ArgData.resize(ArgBytes);
   uint8_t *ArgDataPtr = ArgData.data();
   SmallVector<void*, 16> values(NumArgs);
-  for (Function::const_arg_iterator A = F->arg_begin(), E = F->arg_end();
-       A != E; ++A) {
-    const unsigned ArgNo = A->getArgNo();
-    Type *ArgTy = FTy->getParamType(ArgNo);
+
+  ArgNo = 0;
+  for (std::vector<Type*>::const_iterator Ty=ArgTypes.begin(), TyEnd=ArgTypes.end();
+       Ty != TyEnd; ++Ty, ++ArgNo) {
+    Type *ArgTy = *Ty;
     values[ArgNo] = ffiValueFor(ArgTy, ArgVals[ArgNo], ArgDataPtr);
     ArgDataPtr += TD->getTypeStoreSize(ArgTy);
   }
@@ -218,7 +214,15 @@ static bool ffiInvoke(RawFunc Fn, Function *F,
   Type *RetTy = FTy->getReturnType();
   ffi_type *rtype = ffiTypeFor(RetTy);
 
-  if (ffi_prep_cif(&cif, FFI_DEFAULT_ABI, NumArgs, rtype, &args[0]) == FFI_OK) {
+  ffi_status FFIStatus;
+  if (F->isVarArg()) {
+    FFIStatus = ffi_prep_cif_var(&cif, FFI_DEFAULT_ABI, NumFixedArgs,
+                                 NumArgs, rtype, &args[0]);
+  } else {
+    FFIStatus = ffi_prep_cif(&cif, FFI_DEFAULT_ABI, NumArgs, rtype, &args[0]);
+  }
+
+  if (FFIStatus == FFI_OK) {
     SmallVector<uint8_t, 128> ret;
     if (RetTy->getTypeID() != Type::VoidTyID)
       ret.resize(TD->getTypeStoreSize(RetTy));
@@ -245,7 +249,8 @@ static bool ffiInvoke(RawFunc Fn, Function *F,
 #endif // USE_LIBFFI
 
 GenericValue Interpreter::callExternalFunction(Function *F,
-                                     const std::vector<GenericValue> &ArgVals) {
+                                     const std::vector<GenericValue> &ArgVals,
+                                     const std::vector<Type*> &ArgTypes) {
   TheInterpreter = this;
 
   FunctionsLock->acquire();
@@ -276,7 +281,7 @@ GenericValue Interpreter::callExternalFunction(Function *F,
   FunctionsLock->release();
 
   GenericValue Result;
-  if (RawFn != 0 && ffiInvoke(RawFn, F, ArgVals, getDataLayout(), Result))
+  if (RawFn != 0 && ffiInvoke(RawFn, F, ArgVals, ArgTypes, getDataLayout(), Result))
     return Result;
 #endif // USE_LIBFFI
 

@@ -19,6 +19,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -32,6 +33,16 @@ STATISTIC(NumDynamicInsts, "Number of dynamic instructions executed");
 
 static cl::opt<bool> PrintVolatile("interpreter-print-volatile", cl::Hidden,
           cl::desc("make the interpreter print every volatile load and store"));
+
+static cl::opt<bool> PrintFunctionCalls("print-function-calls", cl::init(false),
+          cl::desc("print function calls"));
+
+cl::opt<bool> PrintGVTypeOnly("ext-log-type",
+ cl::desc("only log external parameter types"),
+ cl::init(false));
+
+extern cl::opt<bool> ExtFuncLog;
+extern raw_fd_ostream *ExtFuncLogFile;
 
 //===----------------------------------------------------------------------===//
 //                     Various Helper Functions
@@ -1069,10 +1080,38 @@ void Interpreter::visitCallSite(CallSite CS) {
     case Intrinsic::not_intrinsic:
       break;
     case Intrinsic::vastart: { // va_start
-      GenericValue ArgIndex;
-      ArgIndex.UIntPairVal.first = ECStack.size() - 1;
-      ArgIndex.UIntPairVal.second = 0;
-      SetValue(CS.getInstruction(), ArgIndex, SF);
+      uint32_t PtrSize = TD.getPointerSizeInBits();
+      if (PtrSize == 32) {
+        GenericValue ArgIndex;
+        ArgIndex.UIntPairVal.first = ECStack.size() - 1;
+        ArgIndex.UIntPairVal.second = 0;
+        SetValue(CS.getInstruction(), ArgIndex, SF);
+      } else if (PtrSize == 64) {
+        GenericValue gp_offset, fp_offset, overflow_arg_area, reg_save_area;
+
+        gp_offset.IntVal = APInt(32, 48);
+        fp_offset.IntVal = APInt(32, 304);
+        overflow_arg_area = PTOGV(ECStack.back().VarArgMemory);
+        reg_save_area.IntVal = APInt(64, 0);
+
+        GenericValue op = getOperandValue(*CS.arg_begin(), SF);
+
+        StoreValueToMemory(gp_offset, (GenericValue*)op.PointerVal,
+                           Type::getInt32Ty(getGlobalContext()));
+
+        op.PointerVal += 4;
+        StoreValueToMemory(fp_offset, (GenericValue*)op.PointerVal,
+                           Type::getInt32Ty(getGlobalContext()));
+
+        op.PointerVal += 4;
+        StoreValueToMemory(overflow_arg_area, (GenericValue*)op.PointerVal,
+                           Type::getInt8PtrTy(getGlobalContext()));
+
+        op.PointerVal += 8;
+        StoreValueToMemory(fp_offset, (GenericValue*)op.PointerVal,
+                           Type::getInt8PtrTy(getGlobalContext()));
+
+      }
       return;
     }
     case Intrinsic::vaend:    // va_end is a noop for the interpreter
@@ -2083,7 +2122,41 @@ void Interpreter::callFunction(Function *F,
 
   // Special handling for external functions.
   if (F->isDeclaration()) {
-    GenericValue Result = callExternalFunction (F, ArgVals);
+    uint16_t numFixedArgs = 0;
+    uint16_t numTotalArgs = 0;
+    std::vector<Type*> ArgTypes;
+
+    // For var arg functions we extract the parameter
+    // type from the caller, for regular functions
+    // we can extract argument types from Function
+    if (F->getFunctionType()->isVarArg()) {
+
+      // Get caller
+      assert(ECStack.size() >= 2);
+      CallSite &Caller = ECStack[ECStack.size()-2].Caller;
+
+      CallSite::arg_iterator i = Caller.arg_begin(), e = Caller.arg_end();
+      for (; i != e; ++i, ++numTotalArgs) {
+        Value *V = *i;
+        ArgTypes.push_back(V->getType());
+        if (numTotalArgs < F->arg_size()) {
+          numFixedArgs++;
+        }
+      }
+    } else {
+      FunctionType *FTy = F->getFunctionType();
+      for (Function::const_arg_iterator A = F->arg_begin(), E = F->arg_end();
+           A != E; ++A) {
+        const unsigned ArgNo = A->getArgNo();
+        Type *ArgTy = FTy->getParamType(ArgNo);
+        ArgTypes.push_back(ArgTy);
+        numFixedArgs++;
+        numTotalArgs++;
+      }
+    }
+
+    GenericValue Result = callExternalFunction (F, ArgVals, ArgTypes);
+
     // Simulate a 'ret' instruction of the appropriate type.
     popStackAndReturnValueToCaller (F->getReturnType (), Result);
     return;
@@ -2106,8 +2179,57 @@ void Interpreter::callFunction(Function *F,
 
   // Handle varargs arguments...
   StackFrame.VarArgs.assign(ArgVals.begin()+i, ArgVals.end());
-}
 
+  // Set up varargs on the stack
+  if (F->getFunctionType()->isVarArg()) {
+    unsigned VarArgsAllocSize = 0;
+    uint32_t PtrSize = TD.getPointerSizeInBits();
+    FunctionType *FTy = F->getFunctionType();
+
+    // Get caller
+    assert(ECStack.size() >= 2);
+    CallSite &Caller = ECStack[ECStack.size()-2].Caller;
+
+    uint16_t pNum = 0;
+    CallSite::arg_iterator i = Caller.arg_begin(), e = Caller.arg_end();
+    for (; i != e; ++i, ++pNum) {
+      // Only want va args
+      if (pNum >= F->arg_size()) {
+        Value *V = *i;
+        if (PtrSize == 32) {
+        } else if (PtrSize == 64) {
+          // Compute allocated size
+          uint64_t AllocBits = TD.getTypeAllocSizeInBits(V->getType());
+          size_t AllocSize = RoundUpToAlignment(AllocBits, PtrSize) / 8;
+          VarArgsAllocSize += AllocSize;
+
+        }
+      }
+    }
+
+    void *Memory = malloc(VarArgsAllocSize);
+    ECStack.back().Allocas.add(Memory);
+
+    i = Caller.arg_begin();
+    pNum = 0;
+    size_t Offset = 0;
+    for (; i != e; ++i, ++pNum) {
+      if (pNum >= F->arg_size()) {
+        Value *V = *i;
+        void *MemoryPtr = Memory + Offset;
+
+        // Write arg to var arg memory
+        StoreValueToMemory(ArgVals[pNum], (GenericValue*)MemoryPtr, V->getType());
+
+        // Compute next offset
+        uint64_t AllocBits = TD.getTypeAllocSizeInBits(V->getType());
+        size_t AllocSize = RoundUpToAlignment(AllocBits, PtrSize) / 8;
+        Offset += AllocSize;
+      }
+    }
+    ECStack.back().VarArgMemory = Memory;
+  }
+}
 
 void Interpreter::run() {
   while (!ECStack.empty()) {

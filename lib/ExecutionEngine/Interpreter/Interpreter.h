@@ -73,6 +73,7 @@ struct ExecutionContext {
   BasicBlock::iterator  CurInst;    // The next instruction to execute
   std::map<Value *, GenericValue> Values; // LLVM values used in this invocation
   std::vector<GenericValue>  VarArgs; // Values passed through an ellipsis
+  void* VarArgMemory;
   CallSite             Caller;     // Holds the call that called subframes.
                                    // NULL if main func or debugger invoked fn
   AllocaHolderHandle    Allocas;    // Track memory allocated by alloca
@@ -191,7 +192,8 @@ public:
   }
 
   GenericValue callExternalFunction(Function *F,
-                                    const std::vector<GenericValue> &ArgVals);
+                                    const std::vector<GenericValue> &ArgVals,
+                                    const std::vector<Type*> &ArgTypes);
   void exitCalled(GenericValue GV);
 
   void addAtExitHandler(Function *F) {
