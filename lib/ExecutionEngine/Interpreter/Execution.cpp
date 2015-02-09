@@ -34,7 +34,7 @@ STATISTIC(NumDynamicInsts, "Number of dynamic instructions executed");
 static cl::opt<bool> PrintVolatile("interpreter-print-volatile", cl::Hidden,
           cl::desc("make the interpreter print every volatile load and store"));
 
-static cl::opt<bool> PrintFunctionCalls("print-function-calls", cl::init(false),
+static cl::opt<bool> PrintFunctionCalls("interpreter-print-function-calls", cl::init(false),
           cl::desc("print function calls"));
 
 cl::opt<bool> PrintGVTypeOnly("ext-log-type",
