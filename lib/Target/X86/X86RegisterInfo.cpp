@@ -416,6 +416,18 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
     }
   }
 
+  // Reserve R15 for springboard
+  Reserved.set(X86::R15);
+  Reserved.set(X86::R15D);
+  Reserved.set(X86::R15W);
+  Reserved.set(X86::R15B);
+
+  // Reserve R15 for springboard
+  Reserved.set(X86::R14);
+  Reserved.set(X86::R14D);
+  Reserved.set(X86::R14W);
+  Reserved.set(X86::R14B);
+
   return Reserved;
 }
 

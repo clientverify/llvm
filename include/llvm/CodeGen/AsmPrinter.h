@@ -107,6 +107,9 @@ public:
   typedef std::pair<const GlobalVariable *, unsigned> GOTEquivUsePair;
   MapVector<const MCSymbol *, GOTEquivUsePair> GlobalGOTEquivs;
 
+  // Hack: Make loop info public
+  /// If VerboseAsm is set, a pointer to the loop info for this function.
+  MachineLoopInfo *LI;
 private:
   MCSymbol *CurrentFnBegin;
   MCSymbol *CurrentFnEnd;
@@ -121,7 +124,7 @@ private:
   static char ID;
 
   /// If VerboseAsm is set, a pointer to the loop info for this function.
-  MachineLoopInfo *LI;
+  //MachineLoopInfo *LI;
 
   struct HandlerInfo {
     AsmPrinterHandler *Handler;

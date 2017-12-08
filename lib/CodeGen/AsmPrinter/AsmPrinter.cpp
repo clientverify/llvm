@@ -11,6 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <iostream>
+
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "DwarfDebug.h"
 #include "DwarfException.h"

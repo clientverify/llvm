@@ -11,6 +11,7 @@
 #define LLVM_LIB_TARGET_X86_X86ASMPRINTER_H
 
 #include "X86Subtarget.h"
+#include "X86CacheAnalysis.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/FaultMaps.h"
 #include "llvm/CodeGen/StackMaps.h"
@@ -29,6 +30,9 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   const X86Subtarget *Subtarget;
   StackMaps SM;
   FaultMaps FM;
+
+  // T-SGX Cache analysis module
+  X86CacheAnalysis CA;
 
   // This utility class tracks the length of a stackmap instruction's 'shadow'.
   // It is used by the X86AsmPrinter to ensure that the stackmap shadow
@@ -91,7 +95,7 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
    explicit X86AsmPrinter(TargetMachine &TM,
                           std::unique_ptr<MCStreamer> Streamer)
        : AsmPrinter(TM, std::move(Streamer)), SM(*this), FM(*this),
-         SMShadowTracker(TM) {}
+         CA(), SMShadowTracker(TM) {}
 
   const char *getPassName() const override {
     return "X86 Assembly / Object Emitter";

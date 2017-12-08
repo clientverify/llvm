@@ -12,6 +12,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <iostream>
+#include <fstream>
+
 #include "X86AsmPrinter.h"
 #include "X86RegisterInfo.h"
 #include "InstPrinter/X86ATTInstPrinter.h"
@@ -23,6 +26,7 @@
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
+#include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/GlobalValue.h"
@@ -1040,9 +1044,982 @@ static std::string getShuffleComment(const MachineOperand &DstOp,
   return Comment;
 }
 
+typedef struct {
+  int base;
+  int scale;
+  int index;
+  int disp;
+} AddressingMode;
+
+std::vector<std::string> fun_wrapper_list;
+
+#define SPLIT_OPT 0
+#define LOOP_OPT 0
+
+//#define SRC_CPP
+#define SRC_C
+
+//#define RAX_SR_ALL
+#define RAX_SR
+
+bool sgx_debug = false;
+bool sgx_tsx = true;
+
+int global_bb_num = 0;
+int global_instr_num = 0;
+int split_required_bb = 0;
+bool split_required = false;
+std::vector<int> split_list;
+
+std::string curr_fun_name("UNKNOWN");
+bool insert_jmp = false;
+bool bb_save_rax = false;
+bool sb_call = false;
+
+static unsigned check_reg_alisas(unsigned reg) {
+  unsigned alias_reg;
+
+  switch (reg) {
+  case X86::AL:
+  case X86::AX:
+  case X86::EAX:
+  case X86::RAX:
+    alias_reg = X86::RAX;
+    break;
+  case X86::BL:
+  case X86::BX:
+  case X86::EBX:
+  case X86::RBX:
+    alias_reg = X86::RBX;
+    break;
+  case X86::CL:
+  case X86::CX:
+  case X86::ECX:
+  case X86::RCX:
+    alias_reg = X86::RCX;
+    break;
+  case X86::DL:
+  case X86::DX:
+  case X86::EDX:
+  case X86::RDX:
+    alias_reg = X86::RDX;
+    break;
+  case X86::SIL:
+  case X86::SI:
+  case X86::ESI:
+  case X86::RSI:
+    alias_reg = X86::RSI;
+    break;
+  case X86::DIL:
+  case X86::DI:
+  case X86::EDI:
+  case X86::RDI:
+    alias_reg = X86::RDI;
+    break;
+  case X86::R8B:
+  case X86::R8W:
+  case X86::R8D:
+  case X86::R8:
+    alias_reg = X86::R8;
+    break;
+  case X86::R9B:
+  case X86::R9W:
+  case X86::R9D:
+  case X86::R9:
+    alias_reg = X86::R9;
+    break;
+  case X86::R10B:
+  case X86::R10W:
+  case X86::R10D:
+  case X86::R10:
+    alias_reg = X86::R10;
+    break;
+  case X86::R11B:
+  case X86::R11W:
+  case X86::R11D:
+  case X86::R11:
+    alias_reg = X86::R11;
+    break;
+  case X86::R12B:
+  case X86::R12W:
+  case X86::R12D:
+  case X86::R12:
+    alias_reg = X86::R12;
+    break;
+  case X86::R13B:
+  case X86::R13W:
+  case X86::R13D:
+  case X86::R13:
+    alias_reg = X86::R13;
+    break;
+  case X86::RBP:
+  case X86::EBP:
+    alias_reg = X86::RBP;
+    break;
+  case X86::RSP:
+  case X86::ESP:
+    alias_reg = X86::RSP;
+    break;
+  default:
+    alias_reg = reg;
+  }
+
+  return alias_reg;
+}
+
 void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   X86MCInstLower MCInstLowering(*MF, *this);
   const X86RegisterInfo *RI = MF->getSubtarget<X86Subtarget>().getRegisterInfo();
+
+  if (TM.Options.MCOptions.TSGX || TM.Options.MCOptions.TSGXOpt) {
+    sgx_tsx = true;
+  } else {
+    sgx_tsx = false;
+  }
+
+  // Whitelisting functions
+  const Function *F = MF->getFunction();
+  const MachineBasicBlock *MBB = MI->getParent();
+  const BasicBlock *B = MBB->getBasicBlock();
+  MachineLoopInfo *MLI = AsmPrinter::LI;
+  if (F->hasMetadata()) {
+    MDNode *node = F->getMetadata("sgxtsx.fun.info");
+    if ((cast<MDString>(node->getOperand(0))->getString() == "internal")) {
+      if ((B == F->begin()) && (MI == MBB->begin())) {
+        if (curr_fun_name != MF->getName().str()) {
+          if (sgx_debug) std::cout << "Function " << F->getName().str() << "\n";
+
+          curr_fun_name = MF->getName().str();
+        }
+      }
+
+      if (MI == MBB->begin()) {
+        if (sgx_debug) std::cout << "EmitInstruction::found first instr in " << MBB->getName().str() << ":" << MF->getName().str() << "\n";
+
+        // If last basic block ends with an conditional jmp or without branch, insert additional
+        // jmp to the springboard.
+        if (insert_jmp) {
+          if (sgx_debug) std::cout << "Last basic block ends with condicitional branch or no branch\n";
+          int target_mbb_num = MBB->getNumber();
+          if (target_mbb_num != 0) {
+            // If the last basic block using rax as destination, save the rax value before the branch.
+            if (sgx_tsx && bb_save_rax) {
+              if (sgx_debug) std::cout << "save rax in bb " << target_mbb_num << "\n";
+#ifdef RAX_SR
+              EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+                .addOperand(MCOperand::createReg(X86::R14))
+                .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+              // Reset the flag.
+              bb_save_rax = false;
+            }
+
+#ifdef RAX_SR_ALL
+            // Workaround
+            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+              .addOperand(MCOperand::createReg(X86::R14))
+              .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+            MCSymbol *sym_target = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(target_mbb_num));
+
+            EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
+              .addOperand(MCOperand::createReg(X86::R15))
+              .addOperand(MCOperand::createReg(X86::RIP))               // base
+              .addOperand(MCOperand::createImm(0))                      // scale
+              .addOperand(MCOperand::createReg(0))                      // index
+              .addExpr(MCSymbolRefExpr::create(sym_target, OutContext)) // disp
+              .addOperand(MCOperand::createReg(0)));                    // seg
+
+            MCSymbol *sym;
+            if (sgx_tsx) {
+              sym = OutContext.getOrCreateSymbol("sb.entry");
+            } else {
+              sym = OutContext.getOrCreateSymbol("sb_no_tsx.entry");
+            }
+            EmitAndCountInstruction(MCInstBuilder(X86::JMP_1)
+              .addExpr(MCSymbolRefExpr::create(sym, OutContext)));
+          }
+
+          // Reset flag
+          insert_jmp = false;
+        }
+
+        // Always insert label in the beginning of the basic block.
+        int target_mbb_num = MBB->getNumber();
+        if (target_mbb_num != 0) {
+          MCSymbol *sym = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(target_mbb_num));
+          OutStreamer->EmitLabel(sym);
+        }
+
+        // If the current basic block using RAX as soruce, insert restore rax instruction.
+        if (sgx_tsx && CA.isRAXSrc(MBB->getNumber())) {
+          if (sgx_debug) std::cout << "rax used as src on BB: " << MBB->getNumber() << "\n";
+#ifdef RAX_SR
+          EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+            .addOperand(MCOperand::createReg(X86::RAX))
+            .addOperand(MCOperand::createReg(X86::R14)));
+#endif
+        }
+
+#ifdef RAX_SR_ALL
+        EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+          .addOperand(MCOperand::createReg(X86::RAX))
+          .addOperand(MCOperand::createReg(X86::R14)));
+#endif
+      } // end of insertion at the beginning of the basic block
+
+      // Check if the basic block requires further split.
+      // If yes, split by:
+      // BB:
+      //    ...
+      //    jmp SP.BB.split.1
+      // BB.split.1:
+      //    ...
+      if (MI != MBB->begin()) {
+        global_instr_num++;
+        if (split_required) {
+          unsigned i;
+          for (i = 0; i < split_list.size(); i++) {
+            if (global_instr_num == split_list[i]) {
+              // Do split here.
+              if (sgx_debug) std::cout << "split at instr: " << global_instr_num << "\n";
+
+              // Base on the label to avoid dubplicate id.
+#if 0
+              int id = 0;
+              std::string sym_label_name = curr_fun_name + ".split." + std::to_string(id);
+              MCSymbol *sym_label = OutContext.getOrCreateSymbol(Twine(sym_label_name));
+              while (1) {
+                if (sym_label->isUndefined()) {
+                break;
+                }
+                id++;
+                sym_label_name = curr_fun_name + ".split." + std::to_string(id);
+                sym_label = OutContext.getOrCreateSymbol(Twine(sym_label_name));
+              }
+
+              std::string sym_target_name = "SP." + curr_fun_name + ".split." + std::to_string(id);
+              MCSymbol *sym_target = OutContext.getOrCreateSymbol(Twine(sym_target_name));
+              EmitAndCountInstruction(MCInstBuilder(X86::JMP_1)
+                .addExpr(MCSymbolRefExpr::create(sym_target, OutContext)));
+
+              OutStreamer->EmitSymbolAttribute(sym_label, MCSA_Global);
+              OutStreamer->EmitLabel(sym_label);
+#endif
+            }
+          }
+        }
+     }
+
+      // Basic block level split
+
+      // Split with optimization.
+      // Split by loop stragegy:
+      // 1. Beginning of the loop: If the branch target is a loop header.
+      // 2. End of the loop: If the branch target is right after the loop ends.
+
+      bool is_loop_header = false;
+      const MachineLoop *loop = MLI->getLoopFor(MBB);
+      if (loop) {
+        MachineBasicBlock *header = loop->getHeader();
+        if (header == MBB) {
+          is_loop_header = true;
+        }
+      }
+
+      // Loop split stragegy 1.
+      if (MI->isBranch()) {
+        if (sgx_debug) std::cout << "Found branch in " << MBB->getName().str() << "\n";
+        if (MI->getOperand(0).isMBB()) {
+          const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
+          int target_mbb_num = target_mbb->getNumber();
+          if (sgx_debug) std::cout << "The branch target is basicblock: " << target_mbb->getName().str() << "\n";
+          int way_usage = CA.getJointBBCacheWayUsage(MBB->getNumber(), target_mbb->getNumber());
+
+          const MachineLoop *target_loop = MLI->getLoopFor(target_mbb);
+          if (target_loop) {
+            MachineBasicBlock *target_header = target_loop->getHeader();
+            if ((way_usage > 7) ||
+                ((target_header == target_mbb) && (target_loop != loop))) {
+              if (sgx_debug) std::cout << "the target is loop header\n";
+              // If current basic block use rax as destination save the rax at the end.
+              if (sgx_tsx && CA.isRAXDst(MBB->getNumber())) {
+                if (sgx_debug) std::cout << "rax used as dst on BB: " << MBB->getNumber() << "\n";
+#ifdef RAX_SR
+                EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+                  .addOperand(MCOperand::createReg(X86::R14))
+                  .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+              }
+#ifdef RAX_SR_ALL
+              EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+                .addOperand(MCOperand::createReg(X86::R14))
+                .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+              MCSymbol *sym_target = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(target_mbb_num));
+
+              EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
+                .addOperand(MCOperand::createReg(X86::R15))
+                .addOperand(MCOperand::createReg(X86::RIP))               // base
+                .addOperand(MCOperand::createImm(0))                      // scale
+                .addOperand(MCOperand::createReg(0))                      // index
+                .addExpr(MCSymbolRefExpr::create(sym_target, OutContext)) // disp
+                .addOperand(MCOperand::createReg(0)));                    // seg
+
+
+              MCSymbol *sym;
+              if (sgx_tsx) {
+                sym = OutContext.getOrCreateSymbol("sb.entry");
+              } else {
+                sym = OutContext.getOrCreateSymbol("sb_no_tsx.entry");
+              }
+              EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
+                .addExpr(MCSymbolRefExpr::create(sym, OutContext)));
+
+              return;
+            }
+          }
+        }
+      } // end of loop split strategy 1
+
+      // Loop split stragegy 2.
+      // First, check if the current basicblock is a loop header as
+      // a loop always ends in a loop header.
+
+      // Then, check the branch target.
+      // If the branch target is in the same loop, it means that the target is the loop body.
+      // We do nothing for this case.
+      // If the branch target is in the different loop or is not in the loop, it means that
+      // the target is only executed after the loop ends. We do split in this case.
+      if (is_loop_header) {
+        if (MI->isBranch()) {
+          if (sgx_debug) std::cout << "Found branch in loop header " << MBB->getName().str() << "\n";
+          if (MI->getOperand(0).isMBB()) {
+            const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
+            int target_mbb_num = target_mbb->getNumber();
+            if (sgx_debug) std::cout << "The branch target is basicblock: " << target_mbb->getName().str() << "\n";
+            int way_usage = CA.getJointBBCacheWayUsage(MBB->getNumber(), target_mbb->getNumber());
+
+            // If the jump target is not inside a loop or in different loop means that
+            // it is the end of current loop.
+            const MachineLoop *target_loop  = MLI->getLoopFor(target_mbb);
+            if ((way_usage > 7) || !target_loop || (target_loop != loop)) {
+              if (sgx_debug) std::cout << "The branch is at the end of the loop " << MBB->getName().str() << "\n";
+
+              // If current basic block use rax as destination save the rax at the end.
+              if (sgx_tsx && CA.isRAXDst(MBB->getNumber())) {
+                if (sgx_debug) std::cout << "rax used as dst on BB: " << MBB->getNumber() << "\n";
+#ifdef RAX_SR
+                EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+                  .addOperand(MCOperand::createReg(X86::R14))
+                  .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+              }
+#ifdef RAX_SR_ALL
+              EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+                .addOperand(MCOperand::createReg(X86::R14))
+                .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+              MCSymbol *sym_target = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(target_mbb_num));
+
+              EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
+                .addOperand(MCOperand::createReg(X86::R15))
+                .addOperand(MCOperand::createReg(X86::RIP))               // base
+                .addOperand(MCOperand::createImm(0))                      // scale
+                .addOperand(MCOperand::createReg(0))                      // index
+                .addExpr(MCSymbolRefExpr::create(sym_target, OutContext)) // disp
+                .addOperand(MCOperand::createReg(0)));                    // seg
+
+              MCSymbol *sym;
+              if (sgx_tsx) {
+                sym = OutContext.getOrCreateSymbol("sb.entry");
+              } else {
+                sym = OutContext.getOrCreateSymbol("sb_no_tsx.entry");
+              }
+              EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
+                .addExpr(MCSymbolRefExpr::create(sym, OutContext)));
+
+              return;
+            }
+
+            if (sgx_debug) std::cout << "special case on " << MF->getName().str() << ":" << MBB->getNumber() <<"\n";
+            MachineBasicBlock::const_iterator MBBI(MI);
+            if (++MBBI == MBB->end()) {
+              insert_jmp = true;
+              // If current basic block use rax as destination save the rax at the end.
+              if (CA.isRAXDst(MBB->getNumber())) {
+                if (sgx_debug) std::cout << "[EmitInstruction] RAX used as dst on BB: " << MBB->getNumber() << "\n";
+                bb_save_rax = true;
+              }
+            }
+          }
+        }
+      } // end of is loop hedaer
+
+      // For the remaining branch, make sure the target is own-defined label.
+      if (MI->isBranch()) {
+        if (sgx_debug) std::cout << "Found branch in " << MBB->getName().str() << "\n";
+        if (MI->getOperand(0).isMBB()) {
+          const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
+          int target_mbb_num = target_mbb->getNumber();
+          if (sgx_debug) std::cout << "The branch target is basicblock: " << target_mbb->getName().str() << "\n";
+
+          // If current basic block use rax as destination, we save the rax at the end.
+          if (sgx_tsx && CA.isRAXDst(MBB->getNumber())) {
+            if (sgx_debug) std::cout << "rax used as dst on BB: " << MBB->getNumber() << "\n";
+#ifdef RAX_SR
+            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+              .addOperand(MCOperand::createReg(X86::R14))
+              .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+          }
+#ifdef RAX_SR_ALL
+          EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+            .addOperand(MCOperand::createReg(X86::R14))
+            .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+
+          MCSymbol *sym = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(target_mbb_num));
+          EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
+            .addExpr(MCSymbolRefExpr::create(sym, OutContext)));
+          return;
+        }
+      }
+
+#if 0 // Deprecared.
+      // Split without any optimization.
+      // Strategy:
+      // Split for every basicblock and call intruction.
+      // If the number of memory read/write exceeds eight, then we further split the basic block
+      // in order to avoid potential cache conflict due to limitiation of 8-way associative.
+
+      // If found branch, check if the target is a basic block.
+      // If yes, replace the basic block target by a springboard label.
+      if (MI->isBranch()) {
+        if (sgx_debug) std::cout << "Found branch in " << MBB->getName().str() << "\n";
+        if (MI->getOperand(0).isMBB()) {
+          const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
+          int target_mbb_num = target_mbb->getNumber();
+          if (sgx_debug) std::cout << "The branch target is basicblock: " << target_mbb->getName().str() << "\n";
+
+          // If current basic block use rax as destination, we save the rax at the end.
+          if (sgx_tsx && CA.isRAXDst(MBB->getNumber())) {
+            if (sgx_debug) std::cout << "rax used as dst on BB: " << MBB->getNumber() << "\n";
+#ifdef RAX_SR
+            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+              .addOperand(MCOperand::createReg(X86::R14))
+              .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+          }
+#ifdef RAX_SR_ALL
+          EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+            .addOperand(MCOperand::createReg(X86::R14))
+            .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+
+          MCSymbol *sym_target = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(target_mbb_num));
+
+          EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
+            .addOperand(MCOperand::createReg(X86::R15))
+            .addOperand(MCOperand::createReg(X86::RIP))               // base
+            .addOperand(MCOperand::createImm(0))                      // scale
+            .addOperand(MCOperand::createReg(0))                      // index
+            .addExpr(MCSymbolRefExpr::create(sym_target, OutContext)) // disp
+            .addOperand(MCOperand::createReg(0)));                    // seg
+
+          MCSymbol *sym;
+          if (sgx_tsx) {
+            sym = OutContext.getOrCreateSymbol("sb.entry");
+          } else {
+            sym = OutContext.getOrCreateSymbol("sb_no_tsx.entry");
+          }
+          EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
+            .addExpr(MCSymbolRefExpr::create(sym, OutContext)));
+
+          // If the basic block ends with conditional branch, insert aditional jmp before the
+          // beginning of the next basic block.
+          MachineBasicBlock::const_iterator MBBI(MI);
+          if ((++MBBI == MBB->end()) && (MI->isConditionalBranch())) {
+            //std::cout << curr_fun_name << " : " << MBB->getNumber() << " end with conditional branch\n";
+#if SPLIT_OPT == 1
+            const MachineLoop *loop = MLI->getLoopFor(MBB);
+            if (!loop) {
+              insert_jmp = false;
+              std::cout << curr_fun_name << " : " << MBB->getNumber() << " not in loop\n";
+              return;
+            }
+#endif
+            insert_jmp = true;
+          }
+
+          return;
+        }
+
+        // If the basic block ends without branch or return, insert jmp before the begninning of the next
+        // basic block.
+        MachineBasicBlock::const_iterator MBBI(MI);
+        if (++MBBI == MBB->end()) {
+          if (!MI->isReturn()) {
+            // If current basic block use rax as destination save the rax at the end.
+            if (CA.isRAXDst(MBB->getNumber())) {
+              std::cout << "[EmitInstruction] RAX used as dst on BB: " << MBB->getNumber() << "\n";
+              bb_save_rax = true;
+            }
+            insert_jmp = true;
+          }
+        }
+      }
+#endif
+      // Basic block level split end
+
+
+      // Call instr split
+
+      // Check for all non-wrapper functions
+      if (fun_wrapper_list.empty()) {
+        // Load file
+        std::ifstream tsgx_functions_log_r;
+        std::string line;
+        tsgx_functions_log_r.open("tsgx_functions_log.txt", std::ios::in);
+        while (getline(tsgx_functions_log_r, line)) {
+#ifdef SRC_CPP
+          fun_wrapper_list.push_back(line.erase(0, 1));
+#endif
+#ifdef SRC_C
+          fun_wrapper_list.push_back(line);
+#endif
+          if (sgx_debug) std::cout << "target list: " << fun_wrapper_list.back() << "\n";
+        }
+        tsgx_functions_log_r.close();
+      }
+
+      // Call instr split strategy.
+      // 1. If the call target is a ocall, we simply split do
+      //    xend
+      //    call ocall
+      //    jmp springboard..
+      //  ocall:
+      //    ...
+      // 2. In general, we split the call by taking call instruction as a single basic block.
+      //    jmp springboard.call.start
+      //  call:
+      //    call fun
+      //    jmp springboard.call.end
+
+      bool save_rax = false;
+      bool is_indirect_call = false;
+      bool indirect_addr_use_rax = false;
+      if (MI->isCall()) {
+        std::string callee_name;
+        AddressingMode indirect_addr;
+        int way_usage = CA.getBBCacheWayUsage(MBB->getNumber());
+        bool call_opt = false;
+        if (way_usage <= 4)
+          call_opt = true;
+
+        // Check if it is a indirect call.
+        if (MI->getOperand(0).isReg()) {
+          callee_name = "indirect_call";
+          is_indirect_call = true;
+          indirect_addr.base  = MI->getOperand(0).getReg();
+          indirect_addr.scale = 0;
+          indirect_addr.index = 0;
+          indirect_addr.disp = 0;
+          if (MI->getNumOperands() > 4 && MI->getOperand(1).isImm() &&
+              MI->getOperand(2).isReg() && MI->getOperand(3).isImm()) {
+            indirect_addr.scale = MI->getOperand(1).getImm();
+            indirect_addr.index = MI->getOperand(2).getReg();
+            indirect_addr.disp  = MI->getOperand(3).getImm();
+          }
+          if (sgx_debug) std::cout << "Indirect call: " << indirect_addr.base << " " << indirect_addr.scale << " " <<indirect_addr.index << " " << indirect_addr.disp <<"\n";
+
+          if (check_reg_alisas(indirect_addr.base) == X86::RAX || check_reg_alisas(indirect_addr.index) == X86::RAX) {
+            indirect_addr_use_rax = true;
+          }
+        } else {
+          callee_name = MCInstLowering.GetSymbolFromOperand(MI->getOperand(0))->getName().str();
+        }
+
+        // Check whether we need to save&restore rax after a call instruction.
+        MachineBasicBlock::const_iterator MBBI(MI);
+        if (CA.isRAXSrcAfterCall(MBB->getNumber(), std::distance(MBB->begin(), MBBI))) {
+          save_rax = true;
+        }
+
+        if (sgx_debug) {
+          if (save_rax) {
+            std::cout << "should save rax\n";
+          }
+        }
+
+        bool is_found = false;
+        for (unsigned int i = 0; i < fun_wrapper_list.size(); i++) {
+          if (callee_name == fun_wrapper_list[i]) {
+            is_found = true;
+            break;
+          }
+        }
+
+        if (!is_found) {
+          if (sgx_debug) std::cout << "no match: " << callee_name << "\n";
+        }
+
+        if (is_found) {
+          if (sgx_debug) std::cout << "call target: " << callee_name << "\n";
+
+//#if SPLIT_OPT == 0
+          int id;
+          if (!call_opt) {
+            // Before insert call instr, insert jmp to the sprinboard and a label
+            // that treat the call as a single basic block.
+
+            // Base on the label to avoid dubplicate id.
+            id = 0;
+            std::string sym_label_name_s = curr_fun_name + ".call." + std::to_string(id) + ".begin";
+            MCSymbol *sym_label_s = OutContext.getOrCreateSymbol(Twine(sym_label_name_s));
+            while (1) {
+              if (sym_label_s->isUndefined()) {
+                break;
+              }
+              id++;
+              sym_label_name_s = curr_fun_name + ".call." + std::to_string(id) + ".begin";
+              sym_label_s = OutContext.getOrCreateSymbol(Twine(sym_label_name_s));
+            }
+
+            EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
+              .addOperand(MCOperand::createReg(X86::R15))
+              .addOperand(MCOperand::createReg(X86::RIP))                // base
+              .addOperand(MCOperand::createImm(0))                       // scale
+              .addOperand(MCOperand::createReg(0))                       // index
+              .addExpr(MCSymbolRefExpr::create(sym_label_s, OutContext)) // disp
+              .addOperand(MCOperand::createReg(0)));                     // seg
+
+            MCSymbol *sym_target_s;
+            if (sgx_tsx) {
+              sym_target_s = OutContext.getOrCreateSymbol("sb.entry");
+            } else {
+              sym_target_s = OutContext.getOrCreateSymbol("sb_no_tsx.entry");
+            }
+            EmitAndCountInstruction(MCInstBuilder(X86::JMP_1)
+              .addExpr(MCSymbolRefExpr::create(sym_target_s, OutContext)));
+
+            OutStreamer->EmitLabel(sym_label_s);
+          }
+//#endif
+
+          // Emit call instruction.
+          MCSymbol *sym = OutContext.getOrCreateSymbol(callee_name);
+          EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
+            .addExpr(MCSymbolRefExpr::create(sym, OutContext)));
+
+//#if SPLIT_OPT == 0
+          if (!call_opt) {
+            // Save rax
+            if (sgx_tsx && save_rax) {
+#ifdef RAX_SR
+              EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+                .addOperand(MCOperand::createReg(X86::R14))
+                .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+            }
+#ifdef RAX_SR_ALL
+            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+              .addOperand(MCOperand::createReg(X86::R14))
+              .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+
+            std::string sym_label_name_e = curr_fun_name + ".call." + std::to_string(id) + ".end";
+            MCSymbol *sym_label_e = OutContext.getOrCreateSymbol(Twine(sym_label_name_e));
+
+            EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
+              .addOperand(MCOperand::createReg(X86::R15))
+              .addOperand(MCOperand::createReg(X86::RIP))                // base
+              .addOperand(MCOperand::createImm(0))                       // scale
+              .addOperand(MCOperand::createReg(0))                       // index
+              .addExpr(MCSymbolRefExpr::create(sym_label_e, OutContext)) // disp
+              .addOperand(MCOperand::createReg(0)));                     // seg
+
+            MCSymbol *sym_target_e;
+            if (sgx_tsx) {
+              sym_target_e = OutContext.getOrCreateSymbol("sb.entry");
+            } else {
+              sym_target_e = OutContext.getOrCreateSymbol("sb_no_tsx.entry");
+            }
+            EmitAndCountInstruction(MCInstBuilder(X86::JMP_1)
+              .addExpr(MCSymbolRefExpr::create(sym_target_e, OutContext)));
+
+            OutStreamer->EmitLabel(sym_label_e);
+
+            // restore rax
+            if (sgx_tsx && save_rax) {
+#ifdef RAX_SR
+              EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+                .addOperand(MCOperand::createReg(X86::RAX))
+                .addOperand(MCOperand::createReg(X86::R14)));
+#endif
+              save_rax = false;
+            }
+#ifdef RAX_SR_ALL
+            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+              .addOperand(MCOperand::createReg(X86::RAX))
+              .addOperand(MCOperand::createReg(X86::R14)));
+#endif
+          }
+//#endif
+          return;
+        }
+
+        // Handle indirect call
+        if (sgx_tsx && is_indirect_call) {
+          // xbegin  exception
+          // jmp springboard
+          // call.begin:
+          // call    ...
+          // jmp springboard
+          // call.end:
+
+//#if SPLIT_OPT == 0
+          int id;
+          if (!call_opt) {
+            // Before insert call instr, insert jmp to the sprinboard and a label
+            // that treat the call as a single basic block.
+
+            if (indirect_addr_use_rax) {
+                // Save rax for indirect call.
+#ifdef RAX_SR
+                EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+                  .addOperand(MCOperand::createReg(X86::R14))
+                  .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+            }
+
+#ifdef RAX_SR_ALL
+            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+              .addOperand(MCOperand::createReg(X86::R14))
+              .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+
+            // Base on the label to avoid dubplicate id.
+            id = 0;
+            std::string sym_label_name_s = curr_fun_name + ".call." + std::to_string(id) + ".begin";
+            MCSymbol *sym_label_s = OutContext.getOrCreateSymbol(Twine(sym_label_name_s));
+            while (1) {
+              if (sym_label_s->isUndefined()) {
+                break;
+              }
+              id++;
+              sym_label_name_s = curr_fun_name + ".call." + std::to_string(id) + ".begin";
+              sym_label_s = OutContext.getOrCreateSymbol(Twine(sym_label_name_s));
+            }
+
+            EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
+              .addOperand(MCOperand::createReg(X86::R15))
+              .addOperand(MCOperand::createReg(X86::RIP))                // base
+              .addOperand(MCOperand::createImm(0))                       // scale
+              .addOperand(MCOperand::createReg(0))                       // index
+              .addExpr(MCSymbolRefExpr::create(sym_label_s, OutContext)) // disp
+              .addOperand(MCOperand::createReg(0)));                     // seg
+
+            MCSymbol *sym_target_s;
+            if (sgx_tsx) {
+              sym_target_s = OutContext.getOrCreateSymbol("sb.entry");
+            } else {
+              sym_target_s = OutContext.getOrCreateSymbol("sb_no_tsx.entry");
+            }
+            EmitAndCountInstruction(MCInstBuilder(X86::JMP_1)
+              .addExpr(MCSymbolRefExpr::create(sym_target_s, OutContext)));
+
+            OutStreamer->EmitLabel(sym_label_s);
+
+            if (indirect_addr_use_rax) {
+              // Restore rax if it is used in the indirect call.
+#ifdef RAX_SR
+              EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+                .addOperand(MCOperand::createReg(X86::RAX))
+                .addOperand(MCOperand::createReg(X86::R14)));
+#endif
+              indirect_addr_use_rax = false;
+            }
+#ifdef RAX_SR_ALL
+	    	    EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+	  	  	    .addOperand(MCOperand::createReg(X86::RAX))
+		  	      .addOperand(MCOperand::createReg(X86::R14)));
+#endif
+          }
+//#endif // End of non-split opt
+          EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
+            .addOperand(MCOperand::createReg(indirect_addr.base))
+            .addOperand(MCOperand::createImm(indirect_addr.scale))
+            .addOperand(MCOperand::createReg(indirect_addr.index))
+            .addOperand(MCOperand::createImm(indirect_addr.disp))
+            .addOperand(MCOperand::createReg(0)));
+
+//#if SPLIT_OPT == 0
+          if (!call_opt) {
+            if (sgx_tsx && save_rax) {
+#ifdef RAX_SR
+              EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+                .addOperand(MCOperand::createReg(X86::R14))
+                .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+            }
+#ifdef RAX_SR_ALL
+            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+              .addOperand(MCOperand::createReg(X86::R14))
+              .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+
+            std::string sym_label_name_e = curr_fun_name + ".call." + std::to_string(id) + ".end";
+            MCSymbol *sym_label_e = OutContext.getOrCreateSymbol(Twine(sym_label_name_e));
+
+            EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
+              .addOperand(MCOperand::createReg(X86::R15))
+              .addOperand(MCOperand::createReg(X86::RIP))                // base
+              .addOperand(MCOperand::createImm(0))                       // scale
+              .addOperand(MCOperand::createReg(0))                       // index
+              .addExpr(MCSymbolRefExpr::create(sym_label_e, OutContext)) // disp
+              .addOperand(MCOperand::createReg(0)));                     // seg
+
+            MCSymbol *sym_target_e;
+            if (sgx_tsx) {
+              sym_target_e = OutContext.getOrCreateSymbol("sb.entry");
+            } else {
+              sym_target_e = OutContext.getOrCreateSymbol("sb_no_tsx.entry");
+            }
+            EmitAndCountInstruction(MCInstBuilder(X86::JMP_1)
+              .addExpr(MCSymbolRefExpr::create(sym_target_e, OutContext)));
+
+            OutStreamer->EmitLabel(sym_label_e);
+
+            if (sgx_tsx && save_rax) {
+#ifdef RAX_SR
+              EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+                .addOperand(MCOperand::createReg(X86::RAX))
+                .addOperand(MCOperand::createReg(X86::R14)));
+#endif
+              save_rax = false;
+            }
+#ifdef RAX_SR_ALL
+            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+              .addOperand(MCOperand::createReg(X86::RAX))
+              .addOperand(MCOperand::createReg(X86::R14)));
+#endif
+          }
+//#endif // End of non-split opt
+
+          return;
+        }
+
+        // Workaround: treat calls without source code as extern call
+        if (sgx_tsx) {
+          // xend
+          // call    ...
+          // jmp springboard
+          // call.end:
+
+          EmitAndCountInstruction(MCInstBuilder(X86::XEND));
+
+          MCSymbol *sym_callee = OutContext.getOrCreateSymbol(callee_name);
+          EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
+            .addExpr(MCSymbolRefExpr::create(sym_callee, OutContext)));
+
+
+          if (sgx_tsx && save_rax) {
+#ifdef RAX_SR
+            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+              .addOperand(MCOperand::createReg(X86::R14))
+              .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+          }
+#ifdef RAX_SR_ALL
+          EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+            .addOperand(MCOperand::createReg(X86::R14))
+            .addOperand(MCOperand::createReg(X86::RAX)));
+#endif
+
+          // Self loop
+          int id = 0;
+          std::string sym_label_name = curr_fun_name + ".ocall." + std::to_string(id);
+          MCSymbol *sym_label = OutContext.getOrCreateSymbol(Twine(sym_label_name));
+          while (1) {
+            if (sym_label->isUndefined()) {
+              break;
+            }
+            id++;
+            sym_label_name = curr_fun_name + ".ocall." + std::to_string(id);
+            sym_label = OutContext.getOrCreateSymbol(Twine(sym_label_name));
+          }
+
+          EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
+            .addOperand(MCOperand::createReg(X86::R15))
+            .addOperand(MCOperand::createReg(X86::RIP))                // base
+            .addOperand(MCOperand::createImm(0))                       // scale
+            .addOperand(MCOperand::createReg(0))                       // index
+            .addExpr(MCSymbolRefExpr::create(sym_label, OutContext))   // disp
+            .addOperand(MCOperand::createReg(0)));                     // seg
+
+          MCSymbol *sym_target;
+          if (sgx_tsx) {
+            sym_target = OutContext.getOrCreateSymbol("sb.entry.ex");
+          } else {
+            sym_target = OutContext.getOrCreateSymbol("sb_no_tsx.entry");
+          }
+          EmitAndCountInstruction(MCInstBuilder(X86::JMP_1)
+            .addExpr(MCSymbolRefExpr::create(sym_target, OutContext)));
+
+          OutStreamer->EmitLabel(sym_label);
+
+          if (sgx_tsx && save_rax) {
+#ifdef RAX_SR
+            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+              .addOperand(MCOperand::createReg(X86::RAX))
+              .addOperand(MCOperand::createReg(X86::R14)));
+#endif
+            save_rax = false;
+          }
+#ifdef RAX_SR_ALL
+          EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+            .addOperand(MCOperand::createReg(X86::RAX))
+            .addOperand(MCOperand::createReg(X86::R14)));
+#endif
+
+          return;
+        }
+      } // end of call-level split
+    } // end of split processing
+  }
+
+  // We wrap xbegin & xend pair on the call instruction in ecall functions.
+
+  // Reset the sb_call flag
+  if (F->hasMetadata()) {
+    MDNode *node = F->getMetadata("sgxtsx.fun.info");
+    if ((cast<MDString>(node->getOperand(0))->getString() == "external")) {
+      if (sb_call) {
+        sb_call = false;
+        if (sgx_tsx) {
+          EmitAndCountInstruction(MCInstBuilder(X86::XEND));
+        }
+      }
+    }
+  }
+
+  if (F->hasMetadata()) {
+    MDNode *node = F->getMetadata("sgxtsx.fun.info");
+    if ((cast<MDString>(node->getOperand(0))->getString() == "external")) {
+      if (MI->isCall()) {
+        if (sgx_debug) std::cout << "Found call in external call: " << MBB->getName().str() << "\n";
+        sb_call = true;
+
+        if (sgx_tsx) {
+          MCSymbol *sym = OutContext.getOrCreateSymbol(Twine(MF->getName()) + ".tsx.call");
+          OutStreamer->EmitLabel(sym);
+          EmitAndCountInstruction(MCInstBuilder(X86::XBEGIN_4)
+            .addExpr(MCSymbolRefExpr::create(sym, OutContext)));
+        }
+      }
+    }
+  }
 
   switch (MI->getOpcode()) {
   case TargetOpcode::DBG_VALUE:

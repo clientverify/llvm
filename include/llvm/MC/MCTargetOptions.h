@@ -34,6 +34,12 @@ public:
   bool ShowMCEncoding : 1;
   bool ShowMCInst : 1;
   bool AsmVerbose : 1;
+
+  // T-SGX options
+  bool TSGX : 1;
+  bool TSGXOpt : 1;
+  bool TSGXDebug : 1;
+
   int DwarfVersion;
   /// getABIName - If this returns a non-empty string this represents the
   /// textual name of the ABI that we want the backend to use, e.g. o32, or

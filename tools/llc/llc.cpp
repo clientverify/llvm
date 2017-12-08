@@ -96,6 +96,16 @@ static cl::opt<bool> AsmVerbose("asm-verbose",
                                 cl::desc("Add comments to directives."),
                                 cl::init(true));
 
+static cl::opt<bool> TSGX("tsgx",
+                          cl::desc("Enable T-SGX (w/o optimization)"),
+                          cl::init(false));
+static cl::opt<bool> TSGXOpt("tsgx-opt",
+                             cl::desc("Enable T-SGX (w/ optimization)"),
+                             cl::init(false));
+static cl::opt<bool> TSGXDebug("tsgx-debug",
+                               cl::desc("Show T-SGX debug message"),
+                               cl::init(false));
+
 static int compileModule(char **, LLVMContext &);
 
 static std::unique_ptr<tool_output_file>
@@ -278,6 +288,9 @@ static int compileModule(char **argv, LLVMContext &Context) {
   Options.MCOptions.ShowMCEncoding = ShowMCEncoding;
   Options.MCOptions.MCUseDwarfDirectory = EnableDwarfDirectory;
   Options.MCOptions.AsmVerbose = AsmVerbose;
+  Options.MCOptions.TSGX = TSGX;
+  Options.MCOptions.TSGXOpt = TSGXOpt;
+  Options.MCOptions.TSGXDebug = TSGXDebug;
 
   std::unique_ptr<TargetMachine> Target(
       TheTarget->createTargetMachine(TheTriple.getTriple(), CPUStr, FeaturesStr,
