@@ -50,6 +50,9 @@ void X86ATTInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
   if (TSFlags & X86II::LOCK)
     OS << "\tlock\t";
 
+  //DEBUG:
+  //MI->dump();
+
   // Output CALLpcrel32 as "callq" in 64-bit mode.
   // In Intel annotation it's always emitted as "call".
   //
@@ -283,6 +286,10 @@ void X86ATTInstPrinter::printMemOffset(const MCInst *MI, unsigned Op,
 
 void X86ATTInstPrinter::printU8Imm(const MCInst *MI, unsigned Op,
                                    raw_ostream &O) {
+  //DEBUG:
+
+  //printf("\n printU8Imm: Op num is %d \n)",Op);
+
   O << markup("<imm:") << '$' << formatImm(MI->getOperand(Op).getImm() & 0xff)
     << markup(">");
 }

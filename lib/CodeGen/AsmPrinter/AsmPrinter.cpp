@@ -784,6 +784,8 @@ void AsmPrinter::emitFrameAlloc(const MachineInstr &MI) {
 /// EmitFunctionBody - This method emits the body and trailer for a
 /// function.
 void AsmPrinter::EmitFunctionBody() {
+
+
   EmitFunctionHeader();
 
   // Emit target-specific gunk before the function body.
@@ -797,7 +799,7 @@ void AsmPrinter::EmitFunctionBody() {
     // Print a label for the basic block.
     EmitBasicBlockStart(MBB);
     for (auto &MI : MBB) {
-
+      //MI.dump();
       // Print the assembly for the instruction.
       if (!MI.isPosition() && !MI.isImplicitDef() && !MI.isKill() &&
           !MI.isDebugValue()) {
@@ -845,7 +847,8 @@ void AsmPrinter::EmitFunctionBody() {
         if (isVerbose()) emitKill(&MI, *this);
         break;
       default:
-        EmitInstruction(&MI);
+	//MI.dump();
+	EmitInstruction(&MI);
         break;
       }
 

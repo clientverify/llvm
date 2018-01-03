@@ -14,7 +14,7 @@
 
 // Get the target-independent interfaces which we are implementing...
 //
-include "llvm/Target/Target.td"
+include "/playpen/humphries/tsgx/padding/llvm-tsgx/include/llvm/Target/Target.td"
 
 //===----------------------------------------------------------------------===//
 // X86 Subtarget state

@@ -113,6 +113,10 @@ namespace llvm {
   }
 
   void X86AsmPrinter::EmitAndCountInstruction(MCInst &Inst) {
+
+    //printf("\n %s \n", "Emitting a MCInst");
+    //Inst.dump();
+
     OutStreamer->EmitInstruction(Inst, getSubtargetInfo());
     SMShadowTracker.count(Inst, getSubtargetInfo());
   }
@@ -1168,6 +1172,8 @@ static unsigned check_reg_alisas(unsigned reg) {
 }
 
 void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
+  //MI->dump();
+
   X86MCInstLower MCInstLowering(*MF, *this);
   const X86RegisterInfo *RI = MF->getSubtarget<X86Subtarget>().getRegisterInfo();
 
@@ -2312,6 +2318,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     OutStreamer->EmitInstruction(TmpInst, getSubtargetInfo());
     return;
   }
-
+  //printf(" Pre-emit and count : \n");
+  //MI->dump();
   EmitAndCountInstruction(TmpInst);
 }
