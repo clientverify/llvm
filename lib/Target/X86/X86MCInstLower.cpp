@@ -137,7 +137,10 @@ MachineModuleInfoMachO &X86MCInstLower::getMachOMMI() const {
 MCSymbol *X86MCInstLower::
 GetSymbolFromOperand(const MachineOperand &MO) const {
   const DataLayout *DL = TM.getDataLayout();
-  assert((MO.isGlobal() || MO.isSymbol() || MO.isMBB()) && "Isn't a symbol reference");
+  if(!(MO.isGlobal() || MO.isSymbol() || MO.isMBB())) {
+    MO.getParent()->dump();
+    assert(false && "Isn't a symbol reference");
+  }
 
   MCSymbol *Sym = nullptr;
   SmallString<128> Name;
@@ -1623,11 +1626,12 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
         if (way_usage <= 4)
           call_opt = true;
 
+        const MachineOperand &MO0 = MI->getOperand(0);
         // Check if it is a indirect call.
-        if (MI->getOperand(0).isReg()) {
+        if (MO0.isReg()) {
           callee_name = "indirect_call";
           is_indirect_call = true;
-          indirect_addr.base  = MI->getOperand(0).getReg();
+          indirect_addr.base  = MO0.getReg();
           indirect_addr.scale = 0;
           indirect_addr.index = 0;
           indirect_addr.disp = 0;
@@ -1642,8 +1646,12 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
           if (check_reg_alisas(indirect_addr.base) == X86::RAX || check_reg_alisas(indirect_addr.index) == X86::RAX) {
             indirect_addr_use_rax = true;
           }
+        } else if (MO0.isMCSymbol()) {
+          // I don't understand enough to know if this is the right thing to do.
+          // TODO: Check this.
+          callee_name = MO0.getMCSymbol()->getName().str();
         } else {
-          callee_name = MCInstLowering.GetSymbolFromOperand(MI->getOperand(0))->getName().str();
+          callee_name = MCInstLowering.GetSymbolFromOperand(MO0)->getName().str();
         }
 
         // Check whether we need to save&restore rax after a call instruction.
