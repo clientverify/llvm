@@ -2035,6 +2035,9 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     }
   }
 
+
+  // This is where the upstream LLVM code begins for EmitInstruction.
+
   switch (MI->getOpcode()) {
   case TargetOpcode::DBG_VALUE:
     llvm_unreachable("Should be handled target independently");
