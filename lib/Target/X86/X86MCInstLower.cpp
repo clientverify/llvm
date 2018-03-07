@@ -40,6 +40,7 @@
 #include "llvm/MC/MCInstBuilder.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
 
@@ -1059,7 +1060,6 @@ typedef struct {
 } AddressingMode;
 
 std::vector<std::string> fun_wrapper_list;
-bool sgx_debug = false;
 
 std::string curr_fun_name("UNKNOWN");
 bool insert_jmp = false;
@@ -1079,10 +1079,11 @@ bool uses_rax(unsigned reg) {
 }
 
 void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
-  //MI->dump();
 
   X86MCInstLower MCInstLowering(*MF, *this);
   const X86RegisterInfo *RI = MF->getSubtarget<X86Subtarget>().getRegisterInfo();
+
+#define DEBUG_TYPE "tsgx"
 
   // Whitelisting functions
   const Function *F = MF->getFunction();
@@ -1094,24 +1095,24 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     if ((cast<MDString>(node->getOperand(0))->getString() == "internal")) {
       if ((B == F->begin()) && (MI == MBB->begin())) {
         if (curr_fun_name != MF->getName().str()) {
-          if (sgx_debug) std::cout << "Function " << F->getName().str() << "\n";
+          DEBUG(dbgs() << "Function " << F->getName().str() << "\n");
 
           curr_fun_name = MF->getName().str();
         }
       }
 
       if (MI == MBB->begin()) {
-        if (sgx_debug) std::cout << "EmitInstruction::found first instr in " << MBB->getName().str() << ":" << MF->getName().str() << "\n";
+        DEBUG(dbgs() << "EmitInstruction::found first instr in " << MBB->getName().str() << ":" << MF->getName().str() << "\n");
 
         // If last basic block ends with an conditional jmp or without branch, insert additional
         // jmp to the springboard.
         if (insert_jmp) {
-          if (sgx_debug) std::cout << "Last basic block ends with condicitional branch or no branch\n";
+          DEBUG(dbgs() << "Last basic block ends with condicitional branch or no branch\n");
           int target_mbb_num = MBB->getNumber();
           if (target_mbb_num != 0) {
             // If the last basic block using rax as destination, save the rax value before the branch.
             if (bb_save_rax) {
-              if (sgx_debug) std::cout << "save rax in bb " << target_mbb_num << "\n";
+              DEBUG(dbgs() << "save rax in bb " << target_mbb_num << "\n");
               EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
                 .addOperand(MCOperand::createReg(X86::R14))
                 .addOperand(MCOperand::createReg(X86::RAX)));
@@ -1147,7 +1148,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
         // If the current basic block using RAX as soruce, insert restore rax instruction.
         if (CA.isRAXSrc(MBB->getNumber())) {
-          if (sgx_debug) std::cout << "rax used as src on BB: " << MBB->getNumber() << "\n";
+          DEBUG(dbgs() << "rax used as src on BB: " << MBB->getNumber() << "\n");
           EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
             .addOperand(MCOperand::createReg(X86::RAX))
             .addOperand(MCOperand::createReg(X86::R14)));
@@ -1172,11 +1173,11 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
       // Loop split stragegy 1.
       if (MI->isBranch()) {
-        if (sgx_debug) std::cout << "Found branch in " << MBB->getName().str() << "\n";
+        DEBUG(dbgs() << "Found branch in " << MBB->getName().str() << "\n");
         if (MI->getOperand(0).isMBB()) {
           const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
           int target_mbb_num = target_mbb->getNumber();
-          if (sgx_debug) std::cout << "The branch target is basicblock: " << target_mbb->getName().str() << "\n";
+          DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName().str() << "\n");
           int way_usage = CA.getJointBBCacheWayUsage(MBB->getNumber(), target_mbb->getNumber());
 
           const MachineLoop *target_loop = MLI->getLoopFor(target_mbb);
@@ -1184,10 +1185,10 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
             MachineBasicBlock *target_header = target_loop->getHeader();
             if ((way_usage > 7) ||
                 ((target_header == target_mbb) && (target_loop != loop))) {
-              if (sgx_debug) std::cout << "the target is loop header\n";
+              DEBUG(dbgs() << "the target is loop header\n");
               // If current basic block use rax as destination save the rax at the end.
               if (CA.isRAXDst(MBB->getNumber())) {
-                if (sgx_debug) std::cout << "rax used as dst on BB: " << MBB->getNumber() << "\n";
+                DEBUG(dbgs() << "rax used as dst on BB: " << MBB->getNumber() << "\n");
                 EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
                   .addOperand(MCOperand::createReg(X86::R14))
                   .addOperand(MCOperand::createReg(X86::RAX)));
@@ -1225,22 +1226,22 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       // the target is only executed after the loop ends. We do split in this case.
       if (is_loop_header) {
         if (MI->isBranch()) {
-          if (sgx_debug) std::cout << "Found branch in loop header " << MBB->getName().str() << "\n";
+          DEBUG(dbgs() << "Found branch in loop header " << MBB->getName().str() << "\n");
           if (MI->getOperand(0).isMBB()) {
             const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
             int target_mbb_num = target_mbb->getNumber();
-            if (sgx_debug) std::cout << "The branch target is basicblock: " << target_mbb->getName().str() << "\n";
+            DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName().str() << "\n");
             int way_usage = CA.getJointBBCacheWayUsage(MBB->getNumber(), target_mbb->getNumber());
 
             // If the jump target is not inside a loop or in different loop means that
             // it is the end of current loop.
             const MachineLoop *target_loop  = MLI->getLoopFor(target_mbb);
             if ((way_usage > 7) || !target_loop || (target_loop != loop)) {
-              if (sgx_debug) std::cout << "The branch is at the end of the loop " << MBB->getName().str() << "\n";
+              DEBUG(dbgs() << "The branch is at the end of the loop " << MBB->getName().str() << "\n");
 
               // If current basic block use rax as destination save the rax at the end.
               if (CA.isRAXDst(MBB->getNumber())) {
-                if (sgx_debug) std::cout << "rax used as dst on BB: " << MBB->getNumber() << "\n";
+                DEBUG(dbgs() << "rax used as dst on BB: " << MBB->getNumber() << "\n");
                 EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
                   .addOperand(MCOperand::createReg(X86::R14))
                   .addOperand(MCOperand::createReg(X86::RAX)));
@@ -1263,13 +1264,14 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
               return;
             }
 
-            if (sgx_debug) std::cout << "special case on " << MF->getName().str() << ":" << MBB->getNumber() <<"\n";
+            DEBUG(dbgs()<< "special case on " << MF->getName().str() << ":" << MBB->getNumber() <<"\n");
             MachineBasicBlock::const_iterator MBBI(MI);
+            // TODO: Double check the ++ here.  Why was the return needed earlier?
             if (++MBBI == MBB->end()) {
               insert_jmp = true;
               // If current basic block use rax as destination save the rax at the end.
               if (CA.isRAXDst(MBB->getNumber())) {
-                if (sgx_debug) std::cout << "[EmitInstruction] RAX used as dst on BB: " << MBB->getNumber() << "\n";
+                DEBUG(dbgs() << "[EmitInstruction] RAX used as dst on BB: " << MBB->getNumber() << "\n");
                 bb_save_rax = true;
               }
             }
@@ -1279,15 +1281,15 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
       // For the remaining branch, make sure the target is own-defined label.
       if (MI->isBranch()) {
-        if (sgx_debug) std::cout << "Found branch in " << MBB->getName().str() << "\n";
+        DEBUG(dbgs() << "Found branch in " << MBB->getName().str() << "\n");
         if (MI->getOperand(0).isMBB()) {
           const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
           int target_mbb_num = target_mbb->getNumber();
-          if (sgx_debug) std::cout << "The branch target is basicblock: " << target_mbb->getName().str() << "\n";
+          DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName().str() << "\n");
 
           // If current basic block use rax as destination, we save the rax at the end.
           if (CA.isRAXDst(MBB->getNumber())) {
-            if (sgx_debug) std::cout << "rax used as dst on BB: " << MBB->getNumber() << "\n";
+            DEBUG(dbgs() << "rax used as dst on BB: " << MBB->getNumber() << "\n");
             EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
               .addOperand(MCOperand::createReg(X86::R14))
               .addOperand(MCOperand::createReg(X86::RAX)));
@@ -1312,7 +1314,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
         tsgx_functions_log_r.open("tsgx_functions_log.txt", std::ios::in);
         while (getline(tsgx_functions_log_r, line)) {
           fun_wrapper_list.push_back(line);
-          if (sgx_debug) std::cout << "target list: " << fun_wrapper_list.back() << "\n";
+          DEBUG(dbgs() << "target list: " << fun_wrapper_list.back() << "\n");
         }
         tsgx_functions_log_r.close();
       }
@@ -1356,7 +1358,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
             indirect_addr.index = MI->getOperand(2).getReg();
             indirect_addr.disp  = MI->getOperand(3).getImm();
           }
-          if (sgx_debug) std::cout << "Indirect call: " << indirect_addr.base << " " << indirect_addr.scale << " " <<indirect_addr.index << " " << indirect_addr.disp <<"\n";
+          DEBUG(dbgs() << "Indirect call: " << indirect_addr.base << " " << indirect_addr.scale << " " <<indirect_addr.index << " " << indirect_addr.disp <<"\n");
 
           if (uses_rax(indirect_addr.base) || uses_rax(indirect_addr.index)) {
             indirect_addr_use_rax = true;
@@ -1375,10 +1377,8 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
           save_rax = true;
         }
 
-        if (sgx_debug) {
-          if (save_rax) {
-            std::cout << "should save rax\n";
-          }
+        if (save_rax) {
+          DEBUG(dbgs() << "should save rax\n");
         }
 
         bool is_found = false;
@@ -1390,11 +1390,11 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
         }
 
         if (!is_found) {
-          if (sgx_debug) std::cout << "no match: " << callee_name << "\n";
+          DEBUG(dbgs() << "no match: " << callee_name << "\n");
         }
 
         if (is_found) {
-          if (sgx_debug) std::cout << "call target: " << callee_name << "\n";
+          DEBUG(dbgs() << "call target: " << callee_name << "\n");
 
           int id;
           if (!call_opt) {
@@ -1644,7 +1644,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     MDNode *node = F->getMetadata("sgxtsx.fun.info");
     if ((cast<MDString>(node->getOperand(0))->getString() == "external")) {
       if (MI->isCall()) {
-        if (sgx_debug) std::cout << "Found call in external call: " << MBB->getName().str() << "\n";
+        DEBUG(dbgs() << "Found call in external call: " << MBB->getName().str() << "\n");
         sb_call = true;
 
         MCSymbol *sym = OutContext.getOrCreateSymbol(Twine(MF->getName()) + ".tsx.call");
@@ -1654,6 +1654,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       }
     }
   }
+#undef DEBUG_TYPE
 
   // This is where the upstream LLVM code begins for EmitInstruction.
 
