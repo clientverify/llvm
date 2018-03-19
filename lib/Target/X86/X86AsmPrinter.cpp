@@ -43,7 +43,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
-
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -64,527 +63,524 @@ using namespace llvm;
 bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   Subtarget = &MF.getSubtarget<X86Subtarget>();
 
+#define DEBUG_TYPE "tsgx"
+  DEBUG(dbgs() << "TSGX processing function " << MF.getFunction()->getName() << "\n");
+
+  // Initialize state for TSGX block splitter.
+  SpringboardCounter = 0;
+
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
+  ///////////////////////////
+  //AH CODE
+  ////////////////////////////
 
+  /*Big picture here is that we add "safe" (doesn't change flags or the output of a program)
+  instrumentation whenever an X86_64 instruction directly or indirectly depends on a value from
+  memory.
 
-  if (TM.Options.MCOptions.TSGX) {
+  The idea is that we add poison SIMD-based poison checking by storing the value from memory in
+  a SIMD register, and check it later before the current transaction is committed to
+  make sure it isn't poison.
 
-    ///////////////////////////
-    //AH CODE
-    ////////////////////////////
+  We assume that registers r14 and r15 are reserved and unavailable to the binary we're instrumenting,
+  as done in t-sgx.  We also assume that the SIMD registers are unavailable to the target program,
+  since we use them for poison checking.  We're also assuming that alignment is enforced, ex that
+  quad word values are stored on 8 byte boundaries, longs are stored on 4 byte boundaries, etc;
+  we'll need to thing about how to deal with this on packed structs where alignment may be off.
 
-    /*Big picture here is that we add "safe" (doesn't change flags or the output of a program)
-    instrumentation whenever an X86_64 instruction directly or indirectly depends on a value from
-    memory.
+  Right now, we assume a two-byte poison value is used, and stored repeatedly in XMM7.
+  To avoid issues with checking the alignment of values that are read, we have separate SIMD
+  registers for each of the 4 possible data sizes in x86_64.  The result of the poison checks
+  are OR'd with XMM1, which serves as an indicator variable that contains at least one "1" value
+  if any poison is encountered in a transaction.
 
-    The idea is that we add poison SIMD-based poison checking by storing the value from memory in
-    a SIMD register, and check it later before the current transaction is committed to
-    make sure it isn't poison.
+  Byte values that are read are stored in XMM3.  Word (2 byte) values are stored in XMM4,
+  long/double word (4 byte) values are stored in XMM5, and quad word (8 byte) values are
+  stored in XMM6.
 
-    We assume that registers r14 and r15 are reserved and unavailable to the binary we're instrumenting,
-    as done in t-sgx.  We also assume that the SIMD registers are unavailable to the target program,
-    since we use them for poison checking.  We're also assuming that alignment is enforced, ex that
-    quad word values are stored on 8 byte boundaries, longs are stored on 4 byte boundaries, etc;
-    we'll need to thing about how to deal with this on packed structs where alignment may be off.
+  I haven't chosen the SIMD registers off any particular convention, but if we change them
+  we'll need to update the springboard.s file as well.  In springboard.s, we have have an
+  extra check at the end of every transaction to make sure there's no poison in XMM3-XMM6.
 
-    Right now, we assume a two-byte poison value is used, and stored repeatedly in XMM7.
-    To avoid issues with checking the alignment of values that are read, we have separate SIMD
-    registers for each of the 4 possible data sizes in x86_64.  The result of the poison checks
-    are OR'd with XMM1, which serves as an indicator variable that contains at least one "1" value
-    if any poison is encountered in a transaction.
+  Note that the checks we add depend on the ManchineInstr function "mayLoad()" that checks
+  to see if a given X86 function uses data from memory.  I believe this returns TRUE even
+  if a memory value is just implicitly used, but we'll need to double check that at some
+  point.
 
-    Byte values that are read are stored in XMM3.  Word (2 byte) values are stored in XMM4,
-    long/double word (4 byte) values are stored in XMM5, and quad word (8 byte) values are
-    stored in XMM6.
+  Further down, you'll notice there are two cases for instrumentation -- the fast case, and
+  the slow case.  Fast cases are used when we need to instrument an instruction that performs
+  a move from memory that we can use to recover the value read, ex MOVQ (%r11), %r12 in AT&T syntax.
+  In that case, we can just move from r12 into a SIMD register for checking later.
 
-    I haven't chosen the SIMD registers off any particular convention, but if we change them
-    we'll need to update the springboard.s file as well.  In springboard.s, we have have an
-    extra check at the end of every transaction to make sure there's no poison in XMM3-XMM6.
+  However, if an instruction doesn't explicitly load a "clean copy" of the memory it operates on -- ex ADDQ $5, (%RAX) -- we need
+  to pay for a load from the address in %RAX to a SIMD register for poison checking before the memory
+  value is operated on.  This is the slow case.
 
-    Note that the checks we add depend on the ManchineInstr function "mayLoad()" that checks
-    to see if a given X86 function uses data from memory.  I believe this returns TRUE even
-    if a memory value is just implicitly used, but we'll need to double check that at some
-    point.
+  Finally, note that we record the number of values loaded into SIMD registers in SIMD_index_X  based on the size X
+  of the value read from memory.  When we've filled up a 128-bit SIMD register, we need to check it for poison before
+  we load it with more values.  We do this by checking the values against the poison SIMD register XMM7, and bitwise
+  OR-ing the result into XMM1.
 
-    Further down, you'll notice there are two cases for instrumentation -- the fast case, and
-    the slow case.  Fast cases are used when we need to instrument an instruction that performs
-    a move from memory that we can use to recover the value read, ex MOVQ (%r11), %r12 in AT&T syntax.
-    In that case, we can just move from r12 into a SIMD register for checking later.
 
-    However, if an instruction doesn't explicitly load a "clean copy" of the memory it operates on -- ex ADDQ $5, (%RAX) -- we need
-    to pay for a load from the address in %RAX to a SIMD register for poison checking before the memory
-    value is operated on.  This is the slow case.
+  */
 
-    Finally, note that we record the number of values loaded into SIMD registers in SIMD_index_X  based on the size X
-    of the value read from memory.  When we've filled up a 128-bit SIMD register, we need to check it for poison before
-    we load it with more values.  We do this by checking the values against the poison SIMD register XMM7, and bitwise
-    OR-ing the result into XMM1.
 
+  //IMPORTANT To-do -- Need to add extra check around CALL and RET boundaries to check the four SIMD registers for poison
+  //and OR the results into XMM1.
 
-    */
 
+  //To do:  Make sure adding instructions while also using instruction iterators doesn't mess anything up.
+  //Also double check that this is OK with bundles!!!
+  //Also check that instructions at end of BB get paired with their "check" instructions. Do this via bundles.
 
-    //IMPORTANT To-do -- Need to add extra check around CALL and RET boundaries to check the four SIMD registers for poison
-    //and OR the results into XMM1.
+  DebugLoc DL;
 
 
-    //To do:  Make sure adding instructions while also using instruction iterators doesn't mess anything up.
-    //Also double check that this is OK with bundles!!!
-    //Also check that instructions at end of BB get paired with their "check" instructions. Do this via bundles.
+  for (MachineFunction::iterator I_BB = MF.begin(), E_BB = MF.end(); I_BB != E_BB; I_BB++){
 
-    DebugLoc DL;
+    int simd_index_8  =0;
+    int simd_index_16 =0;
+    int simd_index_32 =0;
+    int simd_index_64 =0;
 
 
-    for (MachineFunction::iterator I_BB = MF.begin(), E_BB = MF.end(); I_BB != E_BB; I_BB++){
+    MachineBasicBlock * Curr_BB = &(*I_BB);
+    for (MachineBasicBlock::instr_iterator I_Instr = Curr_BB->instr_begin(), E_Instr = Curr_BB->instr_end(); I_Instr != E_Instr; I_Instr++) {
+      MachineInstr * MI = &(*I_Instr);
 
-      int simd_index_8  =0;
-      int simd_index_16 =0;
-      int simd_index_32 =0;
-      int simd_index_64 =0;
+      MachineBasicBlock::instr_iterator Next_Instr = std::next(I_Instr,1);
+      unsigned opc = I_Instr->getOpcode();
 
+      //If the instruction can load from memory, check the value.
+      if (MI->mayLoad()) {
 
-      MachineBasicBlock * Curr_BB = &(*I_BB);
-      for (MachineBasicBlock::instr_iterator I_Instr = Curr_BB->instr_begin(), E_Instr = Curr_BB->instr_end(); I_Instr != E_Instr; I_Instr++) {
-        MachineInstr * MI = &(*I_Instr);
+          int firstOpIndex = X86II::getMemoryOperandNo((MI->getDesc()).TSFlags, NULL);
+        int bias = X86II::getOperandBias(MI->getDesc());
+        firstOpIndex += bias;
 
-        MachineBasicBlock::instr_iterator Next_Instr = std::next(I_Instr,1);
-        unsigned opc = I_Instr->getOpcode();
+        bool fastCase = false;
 
-        //If the instruction can load from memory, check the value.
-        if (MI->mayLoad()) {
 
-            int firstOpIndex = X86II::getMemoryOperandNo((MI->getDesc()).TSFlags, NULL);
-          int bias = X86II::getOperandBias(MI->getDesc());
-          firstOpIndex += bias;
+        MachineInstr::mmo_iterator I_Mmo = MI->memoperands_begin();
+        MachineInstr::mmo_iterator E_Mmo = MI->memoperands_end();
 
-          bool fastCase = false;
-
-
-          MachineInstr::mmo_iterator I_Mmo = MI->memoperands_begin();
-          MachineInstr::mmo_iterator E_Mmo = MI->memoperands_end();
-
-          MachineMemOperand * MMO;
-          int readSize;
-          bool hasMemOps = false;
-
-          if (I_Mmo != E_Mmo) {
-            MMO  = MF.getMachineMemOperand(*I_Mmo,(*I_Mmo)->getOffset(),(*I_Mmo)->getSize());
-            readSize = MMO->getSize();
-            hasMemOps = true;
-          }
-          //These are some special and common "fast-case" operations, where
-          //we can grab the value read from memory after it's stored in memory
-          //and store it for poison checking.  That's a LOT faster than paying
-          //for an extra read from memory.
-
-          //At some point we'll want to try and include more instructions for this
-          //optimization.
-          if (
-                (opc == X86::MOV64rm)
-              ||(opc == X86::MOV32rm)
-              ||(opc == X86::MOV16rm)
-              ||(opc == X86::MOV8rm)
-              ||(opc == X86::POP16r)
-              ||(opc == X86::POP32r)
-              ||(opc == X86::POP64r)
-              ||(opc == X86::MOVZX16rm8)
-              ||(opc == X86::MOVZX32rm8)
-              ||(opc == X86::MOVZX32rm16)
-              )
-            {
-              fastCase = true;
-              //printf("\n MATCH \n");
-            };
-
-
-          if (MI->hasOneMemOperand()) {
-            //printf("\n Instruction with weird number of mem ops: ");
-            //MI->dump();
-          }
-
-
-          if (fastCase == true) {
-
-            MCInstrDesc desc;
-            //unsigned destReg;
-            unsigned newReg;
-
-            if (Next_Instr != E_Instr) {
-              //Case 1 -- we're not at the end of the BB.
-              newReg = (I_Instr->getOperand(0)).getReg();
-
-
-
-
-              if ((opc == X86::MOV8rm)) {
-                BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV8rr)), X86::R15B )
-                  .addReg(newReg);
-                BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRBrr)), X86::XMM3)
-                .addReg(X86::XMM3)
-                .addReg(X86::R15)
-                .addImm(simd_index_8);
-                simd_index_8 = (simd_index_8 + 1)%16;
-                if (simd_index_8 == 0 ) {
-                  MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQBrr)),X86::XMM3)
-                    .addReg(X86::XMM3)
-                    .addReg(X86::XMM7);
-
-                    MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
-                    .addReg(X86::XMM1)
-                    .addReg(X86::XMM3);
-
-                }
-
-              }
-              else if ((opc == X86::MOV16rm) ) {
-                BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV16rr)), X86::R15W )
-                  .addReg(newReg);
-                BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRWrri)), X86::XMM4)
-                .addReg(X86::XMM4)
-                .addReg(X86::R15W)
-                .addImm(simd_index_16);
-                simd_index_16 = (simd_index_16 + 1)%8;
-                if (simd_index_16 == 0 ) {
-                  MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM4)
-                    .addReg(X86::XMM4)
-                    .addReg(X86::XMM7);
-
-                  MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
-                    .addReg(X86::XMM1)
-                    .addReg(X86::XMM4);
-                }
-              }
-              else if ((opc == X86::MOV32rm) ) {
-                BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV32rr)), X86::R15D )
-                  .addReg(newReg);
-                BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRDrr)), X86::XMM5)
-                .addReg(X86::XMM5)
-                .addReg(X86::R15D)
-                .addImm(simd_index_32);
-                simd_index_32 = (simd_index_32 + 1)%4;
-                if (simd_index_32 == 0 ) {
-                  MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM5)
-                    .addReg(X86::XMM5)
-                    .addReg(X86::XMM7);
-
-                  MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
-                    .addReg(X86::XMM1)
-                    .addReg(X86::XMM5);
-                }
-              }
-              else if (opc == X86::MOV64rm) {
-                BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV64rr)), X86::R15 )
-                  .addReg(newReg);
-                BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRQrr)), X86::XMM6)
-                .addReg(X86::XMM6)
-                .addReg(X86::R15)
-                .addImm(simd_index_64);
-                simd_index_64 = (simd_index_64 + 1)%2;
-                if (simd_index_64 == 0 ) {
-                  MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM6)
-                    .addReg(X86::XMM6)
-                    .addReg(X86::XMM7);
-
-                  MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
-                    .addReg(X86::XMM1)
-                    .addReg(X86::XMM6);
-                }
-
-              }
-              else if (opc == X86::POP16r) {
-                BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV16rr)), X86::R15W )
-                  .addReg(newReg);
-                BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRWrri)), X86::XMM4)
-                .addReg(X86::XMM4)
-                .addReg(X86::R15W)
-                .addImm(simd_index_16);
-                simd_index_16 = (simd_index_16 + 1)%8;
-                if (simd_index_16 == 0 ) {
-                  MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM4)
-                    .addReg(X86::XMM4)
-                    .addReg(X86::XMM7);
-
-                  MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
-                    .addReg(X86::XMM1)
-                    .addReg(X86::XMM4);
-                }
-              }
-              else if (opc == X86::POP32r) {
-                BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV32rr)), X86::R15D )
-                  .addReg(newReg);
-                BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRDrr)), X86::XMM5)
-                .addReg(X86::XMM5)
-                .addReg(X86::R15D)
-                .addImm(simd_index_32);
-                simd_index_32 = (simd_index_32 + 1)%4;
-                if (simd_index_32 == 0 ) {
-                  MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM5)
-                    .addReg(X86::XMM5)
-                    .addReg(X86::XMM7);
-
-                  MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
-                    .addReg(X86::XMM1)
-                    .addReg(X86::XMM5);
-                }
-              }
-              else if (opc == X86::POP64r) {
-                BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV64rr)), X86::R15 )
-                  .addReg(newReg);
-                BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRQrr)), X86::XMM6)
-                .addReg(X86::XMM6)
-                .addReg(X86::R15)
-                .addImm(simd_index_64);
-                simd_index_64 = (simd_index_64 + 1)%2;
-                if (simd_index_64 == 0 ) {
-                  MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM6)
-                    .addReg(X86::XMM6)
-                    .addReg(X86::XMM7);
-
-                  MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
-                    .addReg(X86::XMM1)
-                    .addReg(X86::XMM6);
-                }
-              }
-
-
-              else if ( (opc == X86::MOVZX16rm8) ) {
-
-                BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV16rr)), X86::R15W )
-                  .addReg(newReg);
-                BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRBrr)), X86::XMM3)
-                  .addReg(X86::XMM3)
-                  .addReg(X86::R15)
-                  .addImm(simd_index_8);
-                simd_index_8 = (simd_index_8 + 1)%16;
-                if (simd_index_8 == 0 ) {
-                  MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQBrr)),X86::XMM3)
-                    .addReg(X86::XMM3)
-                    .addReg(X86::XMM7);
-
-                    MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
-                    .addReg(X86::XMM1)
-                    .addReg(X86::XMM3);
-                }
-
-              }
-              else if ( (opc == X86::MOVZX32rm8)) {
-                BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV32rr)), X86::R15D )
-                  .addReg(newReg);
-                BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRBrr)), X86::XMM3)
-                  .addReg(X86::XMM3)
-                  .addReg(X86::R15)
-                  .addImm(simd_index_8);
-                simd_index_8 = (simd_index_8 + 1)%16;
-                if (simd_index_8 == 0 ) {
-                  MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQBrr)),X86::XMM3)
-                    .addReg(X86::XMM3)
-                    .addReg(X86::XMM7);
-
-                    MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
-                    .addReg(X86::XMM1)
-                    .addReg(X86::XMM3);
-                }
-              }
-              else if ( (opc == X86::MOVZX32rm16) ) {
-                BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV32rr)), X86::R15D )
-                  .addReg(newReg);
-                BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRWrri)), X86::XMM4)
-                .addReg(X86::XMM4)
-                .addReg(X86::R15W)
-                .addImm(simd_index_16);
-                simd_index_16 = (simd_index_16 + 1)%8;
-                if (simd_index_16 == 0 ) {
-                  MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM4)
-                    .addReg(X86::XMM4)
-                    .addReg(X86::XMM7);
-
-                  MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
-                    .addReg(X86::XMM1)
-                    .addReg(X86::XMM4);
-                }
-              }
-
-
-            }
-            //Case 2 -- Instruction not at the end of a Basic block.
-            //We may not actually need to implement this bc a basic block, by definition,
-            //shouldn't have any of the fast case OPs since they don't alter control flow.
-          } else  if (hasMemOps == true){
-            //Not a match for optimized move.
-            DebugLoc DL;
-
-            if (readSize == 1) {
-
-               MachineInstrBuilder MIB = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::MOV8rm)), X86::R15B)
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrBaseReg)) //base
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrScaleAmt))  //Scale
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrIndexReg))  //IndexReg
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrDisp))   //Displacement
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrSegmentReg)) //Segment reg
-                .setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
-
-               BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PINSRBrr)), X86::XMM3)
-                 .addReg(X86::XMM3)
-                 .addReg(X86::R15)
-                 .addImm(simd_index_8);
-
-              simd_index_8 = (simd_index_8 + 1)%16;
-
-              if (simd_index_8 == 0 ) {
-                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQBrr)),X86::XMM3)
-                  .addReg(X86::XMM7)
-                  .addReg(X86::XMM7);
-
-                  MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
-                 .addReg(X86::XMM1)
-                 .addReg(X86::XMM3);
-
-              }
-
-            } else  if (readSize == 2) {
-
-              MachineInstrBuilder MIB = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::MOV16rm)), X86::R15W)
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrBaseReg)) //base
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrScaleAmt))  //Scale
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrIndexReg))  //IndexReg
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrDisp))  //.addGlobalAddress(GV, 0, 0) //Displacement
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrSegmentReg)) //Segment reg
-                .setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
-
-              MachineInstrBuilder MIB_SIMD = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PINSRWrri)), X86::XMM4)
-                .addReg(X86::XMM4)
-                .addReg(X86::R15)
-                .addImm(simd_index_16);
-
-              simd_index_16 = (simd_index_16 + 1)%8;
-
-              if (simd_index_16 == 0 ) {
-                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM4)
-                  .addReg(X86::XMM4)
-                  .addReg(X86::XMM7);
-
-                MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
-                 .addReg(X86::XMM1)
-                 .addReg(X86::XMM4);
-              }
-
-            }else if (readSize ==4) {
-
-              MachineInstrBuilder MIB = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::MOV32rm)), X86::R15D)
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrBaseReg)) //base
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrScaleAmt))  //Scale
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrIndexReg))  //IndexReg
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrDisp))  //.addGlobalAddress(GV, 0, 0) //Displacement
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrSegmentReg)) //Segment reg
-                .setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
-
-              MachineInstrBuilder MIB_SIMD2 = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PINSRDrr)), X86::XMM5)
-                .addReg(X86::XMM5)
-                .addReg(X86::R15D)
-                .addImm(simd_index_32);
-
-              simd_index_32 = (simd_index_32 + 1)%4;
-
-              if (simd_index_32 == 0 ) {
-                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM5)
-                  .addReg(X86::XMM5)
-                  .addReg(X86::XMM7);
-
-                MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
-                 .addReg(X86::XMM1)
-                 .addReg(X86::XMM5);
-              }
-
-            }else if (readSize ==8) {
-
-               MachineInstrBuilder MIB = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::MOV64rm)), X86::R15)
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrBaseReg)) //base
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrScaleAmt))  //Scale
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrIndexReg))  //IndexReg
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrDisp))  //.addGlobalAddress(GV, 0, 0) //Displacement
-                .addOperand(MI->getOperand(firstOpIndex + X86::AddrSegmentReg)) //Segment reg
-                .setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
-
-              MachineInstrBuilder MIB_SIMD = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PINSRQrr)), X86::XMM6)
-                .addReg(X86::XMM6)
-                .addReg(X86::R15)
-                .addImm(simd_index_64); //Fix Later
-
-              simd_index_64 = (simd_index_64 + 1)%2;
-
-              if (simd_index_64 == 0 ) {
-                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM6)
-                  .addReg(X86::XMM6)
-                  .addReg(X86::XMM7);
-
-                MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
-                 .addReg(X86::XMM1)
-                 .addReg(X86::XMM6);
-              }
-            } else {
-              //printf("\n  ERROR: Weird readSize \n");
-              //MI->dump();
-            }
-          }
-
-          //Adding extra checks to handle poison checking across function call boundaries, and between basic blocks.
+        MachineMemOperand * MMO;
+        int readSize;
+        bool hasMemOps = false;
 
+        if (I_Mmo != E_Mmo) {
+          MMO  = MF.getMachineMemOperand(*I_Mmo,(*I_Mmo)->getOffset(),(*I_Mmo)->getSize());
+          readSize = MMO->getSize();
+          hasMemOps = true;
+        }
+        //These are some special and common "fast-case" operations, where
+        //we can grab the value read from memory after it's stored in memory
+        //and store it for poison checking.  That's a LOT faster than paying
+        //for an extra read from memory.
+
+        //At some point we'll want to try and include more instructions for this
+        //optimization.
+        if (
+              (opc == X86::MOV64rm)
+            ||(opc == X86::MOV32rm)
+            ||(opc == X86::MOV16rm)
+            ||(opc == X86::MOV8rm)
+            ||(opc == X86::POP16r)
+            ||(opc == X86::POP32r)
+            ||(opc == X86::POP64r)
+            ||(opc == X86::MOVZX16rm8)
+            ||(opc == X86::MOVZX32rm8)
+            ||(opc == X86::MOVZX32rm16)
+            )
+          {
+            fastCase = true;
+            //printf("\n MATCH \n");
+          };
+
+
+        if (MI->hasOneMemOperand()) {
+          //printf("\n Instruction with weird number of mem ops: ");
+          //MI->dump();
         }
 
-          if (opc == X86::CALL64r || opc == X86::CALL64m || opc == X86::CALL32r || opc == X86::CALL32m || opc == X86::RETL || opc == X86::RETQ || opc == X86::RETIL || opc == X86::RETIQ || (Next_Instr == Curr_BB->instr_end()) ) {
 
-              //Based on the the number of aligned checks done so far, check to see if a "cycle" of the poison SIMD registers is necessary.
-              if (simd_index_8 != 0 ) {
-                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQBrr)),X86::XMM3)
-                  .addReg(X86::XMM7)
+        if (fastCase) {
+
+          MCInstrDesc desc;
+          //unsigned destReg;
+          unsigned newReg;
+
+          if (Next_Instr != E_Instr) {
+            //Case 1 -- we're not at the end of the BB.
+            newReg = (I_Instr->getOperand(0)).getReg();
+
+
+
+
+            if ((opc == X86::MOV8rm)) {
+              BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV8rr)), X86::R15B )
+                .addReg(newReg);
+              BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRBrr)), X86::XMM3)
+              .addReg(X86::XMM3)
+              .addReg(X86::R15)
+              .addImm(simd_index_8);
+              simd_index_8 = (simd_index_8 + 1)%16;
+              if (simd_index_8 == 0 ) {
+                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQBrr)),X86::XMM3)
+                  .addReg(X86::XMM3)
                   .addReg(X86::XMM7);
 
-                MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
+                  MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
                   .addReg(X86::XMM1)
                   .addReg(X86::XMM3);
 
               }
 
-              if (simd_index_16 != 0 ) {
-                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM4)
+            }
+            else if ((opc == X86::MOV16rm) ) {
+              BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV16rr)), X86::R15W )
+                .addReg(newReg);
+              BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRWrri)), X86::XMM4)
+              .addReg(X86::XMM4)
+              .addReg(X86::R15W)
+              .addImm(simd_index_16);
+              simd_index_16 = (simd_index_16 + 1)%8;
+              if (simd_index_16 == 0 ) {
+                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM4)
                   .addReg(X86::XMM4)
                   .addReg(X86::XMM7);
 
-                MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
+                MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
                   .addReg(X86::XMM1)
                   .addReg(X86::XMM4);
               }
-
-
-              if (simd_index_32 != 0 ) {
-                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM5)
+            }
+            else if ((opc == X86::MOV32rm) ) {
+              BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV32rr)), X86::R15D )
+                .addReg(newReg);
+              BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRDrr)), X86::XMM5)
+              .addReg(X86::XMM5)
+              .addReg(X86::R15D)
+              .addImm(simd_index_32);
+              simd_index_32 = (simd_index_32 + 1)%4;
+              if (simd_index_32 == 0 ) {
+                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM5)
                   .addReg(X86::XMM5)
                   .addReg(X86::XMM7);
 
-                MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
+                MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
                   .addReg(X86::XMM1)
                   .addReg(X86::XMM5);
               }
+            }
+            else if (opc == X86::MOV64rm) {
+              BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV64rr)), X86::R15 )
+                .addReg(newReg);
+              BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRQrr)), X86::XMM6)
+              .addReg(X86::XMM6)
+              .addReg(X86::R15)
+              .addImm(simd_index_64);
+              simd_index_64 = (simd_index_64 + 1)%2;
+              if (simd_index_64 == 0 ) {
+                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM6)
+                  .addReg(X86::XMM6)
+                  .addReg(X86::XMM7);
 
-
-              if (simd_index_64 != 0 ) {
-                  MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM6)
-                    .addReg(X86::XMM6)
-                    .addReg(X86::XMM7);
-
-                  MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
-                    .addReg(X86::XMM1)
-                    .addReg(X86::XMM6);
+                MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
+                  .addReg(X86::XMM1)
+                  .addReg(X86::XMM6);
               }
+
+            }
+            else if (opc == X86::POP16r) {
+              BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV16rr)), X86::R15W )
+                .addReg(newReg);
+              BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRWrri)), X86::XMM4)
+              .addReg(X86::XMM4)
+              .addReg(X86::R15W)
+              .addImm(simd_index_16);
+              simd_index_16 = (simd_index_16 + 1)%8;
+              if (simd_index_16 == 0 ) {
+                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM4)
+                  .addReg(X86::XMM4)
+                  .addReg(X86::XMM7);
+
+                MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
+                  .addReg(X86::XMM1)
+                  .addReg(X86::XMM4);
+              }
+            }
+            else if (opc == X86::POP32r) {
+              BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV32rr)), X86::R15D )
+                .addReg(newReg);
+              BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRDrr)), X86::XMM5)
+              .addReg(X86::XMM5)
+              .addReg(X86::R15D)
+              .addImm(simd_index_32);
+              simd_index_32 = (simd_index_32 + 1)%4;
+              if (simd_index_32 == 0 ) {
+                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM5)
+                  .addReg(X86::XMM5)
+                  .addReg(X86::XMM7);
+
+                MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
+                  .addReg(X86::XMM1)
+                  .addReg(X86::XMM5);
+              }
+            }
+            else if (opc == X86::POP64r) {
+              BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV64rr)), X86::R15 )
+                .addReg(newReg);
+              BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRQrr)), X86::XMM6)
+              .addReg(X86::XMM6)
+              .addReg(X86::R15)
+              .addImm(simd_index_64);
+              simd_index_64 = (simd_index_64 + 1)%2;
+              if (simd_index_64 == 0 ) {
+                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM6)
+                  .addReg(X86::XMM6)
+                  .addReg(X86::XMM7);
+
+                MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
+                  .addReg(X86::XMM1)
+                  .addReg(X86::XMM6);
+              }
+            }
+
+
+            else if ( (opc == X86::MOVZX16rm8) ) {
+
+              BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV16rr)), X86::R15W )
+                .addReg(newReg);
+              BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRBrr)), X86::XMM3)
+                .addReg(X86::XMM3)
+                .addReg(X86::R15)
+                .addImm(simd_index_8);
+              simd_index_8 = (simd_index_8 + 1)%16;
+              if (simd_index_8 == 0 ) {
+                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQBrr)),X86::XMM3)
+                  .addReg(X86::XMM3)
+                  .addReg(X86::XMM7);
+
+                  MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
+                  .addReg(X86::XMM1)
+                  .addReg(X86::XMM3);
+              }
+
+            }
+            else if ( (opc == X86::MOVZX32rm8)) {
+              BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV32rr)), X86::R15D )
+                .addReg(newReg);
+              BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRBrr)), X86::XMM3)
+                .addReg(X86::XMM3)
+                .addReg(X86::R15)
+                .addImm(simd_index_8);
+              simd_index_8 = (simd_index_8 + 1)%16;
+              if (simd_index_8 == 0 ) {
+                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQBrr)),X86::XMM3)
+                  .addReg(X86::XMM3)
+                  .addReg(X86::XMM7);
+
+                  MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
+                  .addReg(X86::XMM1)
+                  .addReg(X86::XMM3);
+              }
+            }
+            else if ( (opc == X86::MOVZX32rm16) ) {
+              BuildMI(*Curr_BB, Next_Instr, DL, (TII->get(X86::MOV32rr)), X86::R15D )
+                .addReg(newReg);
+              BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRWrri)), X86::XMM4)
+              .addReg(X86::XMM4)
+              .addReg(X86::R15W)
+              .addImm(simd_index_16);
+              simd_index_16 = (simd_index_16 + 1)%8;
+              if (simd_index_16 == 0 ) {
+                MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM4)
+                  .addReg(X86::XMM4)
+                  .addReg(X86::XMM7);
+
+                MachineInstrBuilder MIB_SIMDPOR = BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PORrr)),X86::XMM1)
+                  .addReg(X86::XMM1)
+                  .addReg(X86::XMM4);
+              }
+            }
+
+
           }
+          //Case 2 -- Instruction not at the end of a Basic block.
+          //We may not actually need to implement this bc a basic block, by definition,
+          //shouldn't have any of the fast case OPs since they don't alter control flow.
+        } else if (hasMemOps == true){
+          //Not a match for optimized move.
+          DebugLoc DL;
+
+          if (readSize == 1) {
+
+              MachineInstrBuilder MIB = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::MOV8rm)), X86::R15B)
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrBaseReg)) //base
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrScaleAmt))  //Scale
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrIndexReg))  //IndexReg
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrDisp))   //Displacement
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrSegmentReg)) //Segment reg
+              .setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
+
+              BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PINSRBrr)), X86::XMM3)
+                .addReg(X86::XMM3)
+                .addReg(X86::R15)
+                .addImm(simd_index_8);
+
+            simd_index_8 = (simd_index_8 + 1)%16;
+
+            if (simd_index_8 == 0 ) {
+              MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQBrr)),X86::XMM3)
+                .addReg(X86::XMM7)
+                .addReg(X86::XMM7);
+
+                MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
+                .addReg(X86::XMM1)
+                .addReg(X86::XMM3);
+
+            }
+
+          } else if (readSize == 2) {
+
+            MachineInstrBuilder MIB = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::MOV16rm)), X86::R15W)
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrBaseReg)) //base
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrScaleAmt))  //Scale
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrIndexReg))  //IndexReg
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrDisp))  //.addGlobalAddress(GV, 0, 0) //Displacement
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrSegmentReg)) //Segment reg
+              .setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
+
+            MachineInstrBuilder MIB_SIMD = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PINSRWrri)), X86::XMM4)
+              .addReg(X86::XMM4)
+              .addReg(X86::R15)
+              .addImm(simd_index_16);
+
+            simd_index_16 = (simd_index_16 + 1)%8;
+
+            if (simd_index_16 == 0 ) {
+              MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM4)
+                .addReg(X86::XMM4)
+                .addReg(X86::XMM7);
+
+              MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
+                .addReg(X86::XMM1)
+                .addReg(X86::XMM4);
+            }
+
+          } else if (readSize ==4) {
+
+            MachineInstrBuilder MIB = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::MOV32rm)), X86::R15D)
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrBaseReg)) //base
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrScaleAmt))  //Scale
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrIndexReg))  //IndexReg
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrDisp))  //.addGlobalAddress(GV, 0, 0) //Displacement
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrSegmentReg)) //Segment reg
+              .setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
+
+            MachineInstrBuilder MIB_SIMD2 = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PINSRDrr)), X86::XMM5)
+              .addReg(X86::XMM5)
+              .addReg(X86::R15D)
+              .addImm(simd_index_32);
+
+            simd_index_32 = (simd_index_32 + 1)%4;
+
+            if (simd_index_32 == 0 ) {
+              MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM5)
+                .addReg(X86::XMM5)
+                .addReg(X86::XMM7);
+
+              MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
+                .addReg(X86::XMM1)
+                .addReg(X86::XMM5);
+            }
+
+          } else if (readSize ==8) {
+
+              MachineInstrBuilder MIB = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::MOV64rm)), X86::R15)
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrBaseReg)) //base
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrScaleAmt))  //Scale
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrIndexReg))  //IndexReg
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrDisp))  //.addGlobalAddress(GV, 0, 0) //Displacement
+              .addOperand(MI->getOperand(firstOpIndex + X86::AddrSegmentReg)) //Segment reg
+              .setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
+
+            MachineInstrBuilder MIB_SIMD = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PINSRQrr)), X86::XMM6)
+              .addReg(X86::XMM6)
+              .addReg(X86::R15)
+              .addImm(simd_index_64); //Fix Later
+
+            simd_index_64 = (simd_index_64 + 1)%2;
+
+            if (simd_index_64 == 0 ) {
+              MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM6)
+                .addReg(X86::XMM6)
+                .addReg(X86::XMM7);
+
+              MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
+                .addReg(X86::XMM1)
+                .addReg(X86::XMM6);
+            }
+          } else {
+            //printf("\n  ERROR: Weird readSize \n");
+            //MI->dump();
+          }
+        }
+
+        //Adding extra checks to handle poison checking across function call boundaries, and between basic blocks.
+
+      }
+
+      if (opc == X86::CALL64r || opc == X86::CALL64m || opc == X86::CALL32r || opc == X86::CALL32m || opc == X86::RETL || opc == X86::RETQ || opc == X86::RETIL || opc == X86::RETIQ || (Next_Instr == Curr_BB->instr_end()) ) {
+
+        //Based on the the number of aligned checks done so far, check to see if a "cycle" of the poison SIMD registers is necessary.
+        if (simd_index_8 != 0 ) {
+          MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQBrr)),X86::XMM3)
+            .addReg(X86::XMM7)
+            .addReg(X86::XMM7);
+
+          MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
+            .addReg(X86::XMM1)
+            .addReg(X86::XMM3);
+
+        }
+
+        if (simd_index_16 != 0 ) {
+          MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM4)
+            .addReg(X86::XMM4)
+            .addReg(X86::XMM7);
+
+          MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
+            .addReg(X86::XMM1)
+            .addReg(X86::XMM4);
+        }
 
 
+        if (simd_index_32 != 0 ) {
+          MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM5)
+            .addReg(X86::XMM5)
+            .addReg(X86::XMM7);
 
-        //MI->dump();
+          MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
+            .addReg(X86::XMM1)
+            .addReg(X86::XMM5);
+        }
+
+
+        if (simd_index_64 != 0 ) {
+            MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQWrr)),X86::XMM6)
+              .addReg(X86::XMM6)
+              .addReg(X86::XMM7);
+
+            MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
+              .addReg(X86::XMM1)
+              .addReg(X86::XMM6);
+        }
       }
     }
-
+#undef DEBUG_TYPE
     ///////////////////////////
     //END AH CODE
     //////////////////////////

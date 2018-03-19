@@ -130,6 +130,19 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   }
 
   bool runOnMachineFunction(MachineFunction &F) override;
+
+private:
+  bool usesRax(unsigned int reg) const;
+  MCSymbol* EmitTsxSpringboard(const Twine& suffix, unsigned int opcode);
+  // Springboard for loop/branch analysis
+  MCSymbol* EmitTsxSpringLoop(const MachineBasicBlock* targetBasicBlock, const MachineInstr *MI, bool saveRax);
+  // Springboard before and after call instructions.
+  MCSymbol* EmitTsxSpringCall(const Twine& suffix, bool saveAndRestoreRax);
+  MCSymbol* getMBBLabel(const MachineBasicBlock* targetBasicBlock);
+  void EmitSaveRax();
+  void EmitRestoreRax();
+
+  unsigned int SpringboardCounter;
 };
 
 } // end namespace llvm

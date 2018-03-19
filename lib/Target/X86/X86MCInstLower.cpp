@@ -40,8 +40,8 @@
 #include "llvm/MC/MCInstBuilder.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Support/Debug.h"
 #include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/Debug.h"
 using namespace llvm;
 
 namespace {
@@ -1052,19 +1052,10 @@ static std::string getShuffleComment(const MachineOperand &DstOp,
   return Comment;
 }
 
-typedef struct {
-  int base;
-  int scale;
-  int index;
-  int disp;
-} AddressingMode;
-
-std::string curr_fun_name("UNKNOWN");
-int curr_fun_id = 0;
 bool insert_jmp = false;
 bool bb_save_rax = false;
 
-bool uses_rax(unsigned reg) {
+bool X86AsmPrinter::usesRax(unsigned reg) const {
   switch (reg) {
   case X86::AL:
   case X86::AX:
@@ -1076,6 +1067,63 @@ bool uses_rax(unsigned reg) {
   }
 }
 
+void X86AsmPrinter::EmitSaveRax() {
+  EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+    .addOperand(MCOperand::createReg(X86::R14))
+    .addOperand(MCOperand::createReg(X86::RAX)));
+}
+
+void X86AsmPrinter::EmitRestoreRax() {
+  EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+    .addOperand(MCOperand::createReg(X86::RAX))
+    .addOperand(MCOperand::createReg(X86::R14)));
+}
+
+MCSymbol* X86AsmPrinter::EmitTsxSpringboard(const Twine& suffix,  unsigned int opcode) {
+  MCSymbol *resume = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + suffix);
+  EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
+    .addOperand(MCOperand::createReg(X86::R15))
+    .addOperand(MCOperand::createReg(X86::RIP))               // base
+    .addOperand(MCOperand::createImm(0))                      // scale
+    .addOperand(MCOperand::createReg(0))                      // index
+    .addExpr(MCSymbolRefExpr::create(resume, OutContext))     // disp
+    .addOperand(MCOperand::createReg(0)));                    // seg
+
+  MCSymbol *spring = OutContext.getOrCreateSymbol("sb.entry");
+
+  EmitAndCountInstruction(MCInstBuilder(opcode)
+    .addExpr(MCSymbolRefExpr::create(spring, OutContext)));
+
+  return resume;
+}
+
+MCSymbol* X86AsmPrinter::EmitTsxSpringLoop(const MachineBasicBlock* targetBasicBlock, const MachineInstr *MI, bool saveRax) {
+  if (saveRax) {
+    EmitSaveRax();
+  }
+  return EmitTsxSpringboard(Twine(targetBasicBlock->getNumber()), MI->getOpcode());
+}
+
+// Use this for prefixing and postfixing call instructions with springboard calls.
+// Use "begin" for the prefix trampoline and "end" for the suffix.
+MCSymbol* X86AsmPrinter::EmitTsxSpringCall(const Twine& suffix, bool saveAndRestoreRax) {
+  if (saveAndRestoreRax) {
+    EmitSaveRax();
+  }
+
+  MCSymbol* resume = EmitTsxSpringboard(".call." + suffix + "." + Twine(++SpringboardCounter), X86::JMP_1);
+  OutStreamer->EmitLabel(resume);
+
+  if (saveAndRestoreRax) {
+    EmitRestoreRax();
+  }
+  return resume;
+}
+
+MCSymbol* X86AsmPrinter::getMBBLabel(const MachineBasicBlock* targetBasicBlock) {
+  return OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(targetBasicBlock->getNumber()));
+}
+
 void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
   X86MCInstLower MCInstLowering(*MF, *this);
@@ -1085,80 +1133,36 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
   const Function *F = MF->getFunction();
   const MachineBasicBlock *MBB = MI->getParent();
-  const BasicBlock *B = MBB->getBasicBlock();
   MachineLoopInfo *MLI = AsmPrinter::LI;
   if (F->hasMetadata()) {
     MDNode *node = F->getMetadata("sgxtsx.fun.info");
     if ((cast<MDString>(node->getOperand(0))->getString() == "instrumented")) {
       // Only instrument functions that are tagged to be instrumented.
-
-      if ((B == F->begin()) && (MI == MBB->begin())) {
-        if (curr_fun_name != MF->getName().str()) {
-          DEBUG(dbgs() << "Function " << F->getName().str() << "\n");
-
-          curr_fun_name = MF->getName().str();
-          curr_fun_id = 0;
-        }
-      }
-
       if (MI == MBB->begin()) {
-        DEBUG(dbgs() << "EmitInstruction::found first instr in " << MBB->getName().str() << ":" << MF->getName().str() << "\n");
-
-        // If last basic block ends with an conditional jmp or without branch, insert additional
-        // jmp to the springboard.
-        if (insert_jmp) {
-          DEBUG(dbgs() << "Last basic block ends with condicitional branch or no branch\n");
-          int target_mbb_num = MBB->getNumber();
-          if (target_mbb_num != 0) {
-            // If the last basic block using rax as destination, save the rax value before the branch.
-            if (bb_save_rax) {
-              DEBUG(dbgs() << "save rax in bb " << target_mbb_num << "\n");
-              EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
-                .addOperand(MCOperand::createReg(X86::R14))
-                .addOperand(MCOperand::createReg(X86::RAX)));
-              // Reset the flag.
-              bb_save_rax = false;
-            }
-            MCSymbol *sym_target = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(target_mbb_num));
-
-            EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
-              .addOperand(MCOperand::createReg(X86::R15))
-              .addOperand(MCOperand::createReg(X86::RIP))               // base
-              .addOperand(MCOperand::createImm(0))                      // scale
-              .addOperand(MCOperand::createReg(0))                      // index
-              .addExpr(MCSymbolRefExpr::create(sym_target, OutContext)) // disp
-              .addOperand(MCOperand::createReg(0)));                    // seg
-
-            MCSymbol *sym;
-            sym = OutContext.getOrCreateSymbol("sb.entry");
-            EmitAndCountInstruction(MCInstBuilder(X86::JMP_1)
-              .addExpr(MCSymbolRefExpr::create(sym, OutContext)));
+        DEBUG(dbgs() << "EmitInstruction::found first instr in " << MBB->getName() << ":" << MF->getName() << "\n");
+        if (MBB->getNumber() != 0) {
+          // If last basic block ends with an conditional jmp or without branch, insert additional
+          // jmp to the springboard.
+          if (insert_jmp) {
+            DEBUG(dbgs() << "Last basic block ends with conditional branch or no branch\n");
+            EmitTsxSpringLoop(MBB, MI, bb_save_rax);
+            bb_save_rax = false;
           }
-
-          // Reset flag
           insert_jmp = false;
-        }
-
-        // Always insert label in the beginning of the basic block.
-        int target_mbb_num = MBB->getNumber();
-        if (target_mbb_num != 0) {
-          MCSymbol *sym = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(target_mbb_num));
-          OutStreamer->EmitLabel(sym);
+          // Always insert label in the beginning of the basic block.
+          OutStreamer->EmitLabel(getMBBLabel(MBB));
         }
 
         // If the current basic block using RAX as soruce, insert restore rax instruction.
         if (CA.isRAXSrc(MBB->getNumber())) {
-          DEBUG(dbgs() << "rax used as src on BB: " << MBB->getNumber() << "\n");
-          EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
-            .addOperand(MCOperand::createReg(X86::RAX))
-            .addOperand(MCOperand::createReg(X86::R14)));
+          EmitRestoreRax();
         }
 
       } // end of insertion at the beginning of the basic block
 
       // Basic block level split
       // Split with optimization.
-      // Split by loop stragegy:
+      // Split by loop strategy:
       // 1. Beginning of the loop: If the branch target is a loop header.
       // 2. End of the loop: If the branch target is right after the loop ends.
 
@@ -1173,11 +1177,10 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
       // Loop split stragegy 1.
       if (MI->isBranch()) {
-        DEBUG(dbgs() << "Found branch in " << MBB->getName().str() << "\n");
+        DEBUG(dbgs() << "Found branch in " << MBB->getName() << "\n");
         if (MI->getOperand(0).isMBB()) {
           const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
-          int target_mbb_num = target_mbb->getNumber();
-          DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName().str() << "\n");
+          DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName() << "\n");
           int way_usage = CA.getJointBBCacheWayUsage(MBB->getNumber(), target_mbb->getNumber());
 
           const MachineLoop *target_loop = MLI->getLoopFor(target_mbb);
@@ -1186,36 +1189,14 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
             if ((way_usage > 7) ||
                 ((target_header == target_mbb) && (target_loop != loop))) {
               DEBUG(dbgs() << "the target is loop header\n");
-              // If current basic block use rax as destination save the rax at the end.
-              if (CA.isRAXDst(MBB->getNumber())) {
-                DEBUG(dbgs() << "rax used as dst on BB: " << MBB->getNumber() << "\n");
-                EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
-                  .addOperand(MCOperand::createReg(X86::R14))
-                  .addOperand(MCOperand::createReg(X86::RAX)));
-              }
-              MCSymbol *sym_target = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(target_mbb_num));
-
-              EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
-                .addOperand(MCOperand::createReg(X86::R15))
-                .addOperand(MCOperand::createReg(X86::RIP))               // base
-                .addOperand(MCOperand::createImm(0))                      // scale
-                .addOperand(MCOperand::createReg(0))                      // index
-                .addExpr(MCSymbolRefExpr::create(sym_target, OutContext)) // disp
-                .addOperand(MCOperand::createReg(0)));                    // seg
-
-
-              MCSymbol *sym;
-              sym = OutContext.getOrCreateSymbol("sb.entry");
-              EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
-                .addExpr(MCSymbolRefExpr::create(sym, OutContext)));
-
+              EmitTsxSpringLoop(target_mbb, MI, CA.isRAXDst(MBB->getNumber()));
               return;
             }
           }
         }
       } // end of loop split strategy 1
 
-      // Loop split stragegy 2.
+      // Loop split strategy 2.
       // First, check if the current basicblock is a loop header as
       // a loop always ends in a loop header.
 
@@ -1226,47 +1207,24 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       // the target is only executed after the loop ends. We do split in this case.
       if (is_loop_header) {
         if (MI->isBranch()) {
-          DEBUG(dbgs() << "Found branch in loop header " << MBB->getName().str() << "\n");
+          DEBUG(dbgs() << "Found branch in loop header " << MBB->getName() << "\n");
           if (MI->getOperand(0).isMBB()) {
             const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
-            int target_mbb_num = target_mbb->getNumber();
-            DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName().str() << "\n");
+            DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName() << "\n");
             int way_usage = CA.getJointBBCacheWayUsage(MBB->getNumber(), target_mbb->getNumber());
 
             // If the jump target is not inside a loop or in different loop means that
             // it is the end of current loop.
             const MachineLoop *target_loop  = MLI->getLoopFor(target_mbb);
             if ((way_usage > 7) || !target_loop || (target_loop != loop)) {
-              DEBUG(dbgs() << "The branch is at the end of the loop " << MBB->getName().str() << "\n");
-
+              DEBUG(dbgs() << "The branch is at the end of the loop " << MBB->getName() << "\n");
               // If current basic block use rax as destination save the rax at the end.
-              if (CA.isRAXDst(MBB->getNumber())) {
-                DEBUG(dbgs() << "rax used as dst on BB: " << MBB->getNumber() << "\n");
-                EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
-                  .addOperand(MCOperand::createReg(X86::R14))
-                  .addOperand(MCOperand::createReg(X86::RAX)));
-              }
-              MCSymbol *sym_target = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(target_mbb_num));
-
-              EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
-                .addOperand(MCOperand::createReg(X86::R15))
-                .addOperand(MCOperand::createReg(X86::RIP))               // base
-                .addOperand(MCOperand::createImm(0))                      // scale
-                .addOperand(MCOperand::createReg(0))                      // index
-                .addExpr(MCSymbolRefExpr::create(sym_target, OutContext)) // disp
-                .addOperand(MCOperand::createReg(0)));                    // seg
-
-              MCSymbol *sym;
-              sym = OutContext.getOrCreateSymbol("sb.entry");
-              EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
-                .addExpr(MCSymbolRefExpr::create(sym, OutContext)));
-
+              EmitTsxSpringLoop(target_mbb, MI, CA.isRAXDst(MBB->getNumber()));
               return;
             }
 
-            DEBUG(dbgs()<< "special case on " << MF->getName().str() << ":" << MBB->getNumber() <<"\n");
+            DEBUG(dbgs()<< "special case on " << MF->getName() << ":" << MBB->getNumber() <<"\n");
             MachineBasicBlock::const_iterator MBBI(MI);
-            // TODO: Double check the ++ here.  Why was the return needed earlier?
             if (++MBBI == MBB->end()) {
               insert_jmp = true;
               // If current basic block use rax as destination save the rax at the end.
@@ -1281,23 +1239,17 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
       // For the remaining branch, make sure the target is own-defined label.
       if (MI->isBranch()) {
-        DEBUG(dbgs() << "Found branch in " << MBB->getName().str() << "\n");
+        DEBUG(dbgs() << "Found branch in " << MBB->getName() << "\n");
         if (MI->getOperand(0).isMBB()) {
           const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
-          int target_mbb_num = target_mbb->getNumber();
-          DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName().str() << "\n");
+          DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName() << "\n");
 
           // If current basic block use rax as destination, we save the rax at the end.
           if (CA.isRAXDst(MBB->getNumber())) {
-            DEBUG(dbgs() << "rax used as dst on BB: " << MBB->getNumber() << "\n");
-            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
-              .addOperand(MCOperand::createReg(X86::R14))
-              .addOperand(MCOperand::createReg(X86::RAX)));
+            EmitSaveRax();
           }
-
-          MCSymbol *sym = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(target_mbb_num));
           EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
-            .addExpr(MCSymbolRefExpr::create(sym, OutContext)));
+            .addExpr(MCSymbolRefExpr::create(getMBBLabel(target_mbb), OutContext)));
           return;
         }
       }
@@ -1315,85 +1267,23 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       //
       // Care is made to preserve rax across a split.
       if (MI->isCall()) {
-        bool save_rax_after = false;
-        bool save_rax_before = false;
-        std::string callee_name;
-        AddressingMode indirect_addr;
         int way_usage = CA.getBBCacheWayUsage(MBB->getNumber());
         bool call_opt = way_usage <= 4;
 
-        const MachineOperand &MO0 = MI->getOperand(0);
-        // Check if it is a indirect call.
-        if (MO0.isReg()) {
-          callee_name = "indirect_call";
-          indirect_addr.base  = MO0.getReg();
-          indirect_addr.scale = 0;
-          indirect_addr.index = 0;
-          indirect_addr.disp = 0;
-          if (MI->getNumOperands() > 4 && MI->getOperand(1).isImm() &&
-              MI->getOperand(2).isReg() && MI->getOperand(3).isImm()) {
-            indirect_addr.scale = MI->getOperand(1).getImm();
-            indirect_addr.index = MI->getOperand(2).getReg();
-            indirect_addr.disp  = MI->getOperand(3).getImm();
-          }
-
-          if (uses_rax(indirect_addr.base) || uses_rax(indirect_addr.index)) {
-            save_rax_before = true;
-            DEBUG(dbgs() << "should save rax before call\n");
-          }
-        } else if (MO0.isMCSymbol()) {
-          // I don't understand enough to know if this is the right thing to do.
-          // TODO: Should we always begin/end around LLVM intrinsics?
-          // It's easier for now - we have no knowledge how big a memcpy or memcmp
-          // or math function might be.
-          callee_name = MO0.getMCSymbol()->getName().str();
-        } else {
-          callee_name = MCInstLowering.GetSymbolFromOperand(MO0)->getName().str();
-        }
-
-        // Check whether we need to save&restore rax after a call instruction.
-        MachineBasicBlock::const_iterator MBBI(MI);
-        if (CA.isRAXSrcAfterCall(MBB->getNumber(), std::distance(MBB->begin(), MBBI))) {
-          save_rax_after = true;
-          DEBUG(dbgs() << "should save rax after call\n");
-        }
-
         if (!call_opt) {
-          // Before insert call instr, insert jmp to the sprinboard and a label
-          // that treat the call as a single basic block.
+          bool save_rax_before = false;
+          // Check if it is a indirect call.
+          const MachineOperand &MO0 = MI->getOperand(0);
+          if (MO0.isReg()) {
+            int index = 0;
+            if (MI->getNumOperands() > 4 && MI->getOperand(1).isImm() &&
+                MI->getOperand(2).isReg() && MI->getOperand(3).isImm()) {
+              index = MI->getOperand(2).getReg();
+            }
 
-          if (save_rax_before) {
-            // Save rax for indirect call.
-            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
-              .addOperand(MCOperand::createReg(X86::R14))
-              .addOperand(MCOperand::createReg(X86::RAX)));
+            save_rax_before = usesRax(MO0.getReg()) || usesRax(index);
           }
-
-          std::string sym_label_name_s = curr_fun_name + ".call." + std::to_string(curr_fun_id) + ".begin";
-          MCSymbol *sym_label_s = OutContext.getOrCreateSymbol(Twine(sym_label_name_s));
-          curr_fun_id++;
-
-          EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
-            .addOperand(MCOperand::createReg(X86::R15))
-            .addOperand(MCOperand::createReg(X86::RIP))                // base
-            .addOperand(MCOperand::createImm(0))                       // scale
-            .addOperand(MCOperand::createReg(0))                       // index
-            .addExpr(MCSymbolRefExpr::create(sym_label_s, OutContext)) // disp
-            .addOperand(MCOperand::createReg(0)));                     // seg
-
-          MCSymbol *sym_target_s;
-          sym_target_s = OutContext.getOrCreateSymbol("sb.entry");
-          EmitAndCountInstruction(MCInstBuilder(X86::JMP_1)
-            .addExpr(MCSymbolRefExpr::create(sym_target_s, OutContext)));
-
-          OutStreamer->EmitLabel(sym_label_s);
-
-          if (save_rax_before) {
-            // Restore rax if it is used in the indirect call.
-            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
-              .addOperand(MCOperand::createReg(X86::RAX))
-              .addOperand(MCOperand::createReg(X86::R14)));
-          }
+          EmitTsxSpringCall(".call.begin", save_rax_before);
         }
 
         // For now, assume that anything we are compiling for instrumentation only
@@ -1402,53 +1292,15 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
         // If there are special klee_ or uclibc functions that need to be special
         // cased, that would happen here.
         //
-        // TODO: Hmm...  why not just emit MI?
-        if (callee_name != "indirect_call") {
-          DEBUG(dbgs() << "call target: " << callee_name << "\n");
-          MCSymbol *sym = OutContext.getOrCreateSymbol(callee_name);
-          EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
-            .addExpr(MCSymbolRefExpr::create(sym, OutContext)));
-        } else {
-          DEBUG(dbgs() << "Indirect call: " << indirect_addr.base << " " << indirect_addr.scale << " " << indirect_addr.index << " " << indirect_addr.disp <<"\n");
-          EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
-            .addOperand(MCOperand::createReg(indirect_addr.base))
-            .addOperand(MCOperand::createImm(indirect_addr.scale))
-            .addOperand(MCOperand::createReg(indirect_addr.index))
-            .addOperand(MCOperand::createImm(indirect_addr.disp))
-            .addOperand(MCOperand::createReg(0)));
-        }
+        // Ignore shadow map tracking - oh well :(
+        MCInst CallInst;
+        MCInstLowering.Lower(MI, CallInst);
+        EmitAndCountInstruction(CallInst);
 
         if (!call_opt) {
-          // Save rax
-          if (save_rax_after) {
-            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
-              .addOperand(MCOperand::createReg(X86::R14))
-              .addOperand(MCOperand::createReg(X86::RAX)));
-          }
-          std::string sym_label_name_e = curr_fun_name + ".call." + std::to_string(curr_fun_id) + ".end";
-          MCSymbol *sym_label_e = OutContext.getOrCreateSymbol(Twine(sym_label_name_e));
-
-          EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
-            .addOperand(MCOperand::createReg(X86::R15))
-            .addOperand(MCOperand::createReg(X86::RIP))                // base
-            .addOperand(MCOperand::createImm(0))                       // scale
-            .addOperand(MCOperand::createReg(0))                       // index
-            .addExpr(MCSymbolRefExpr::create(sym_label_e, OutContext)) // disp
-            .addOperand(MCOperand::createReg(0)));                     // seg
-
-          MCSymbol *sym_target_e;
-          sym_target_e = OutContext.getOrCreateSymbol("sb.entry");
-          EmitAndCountInstruction(MCInstBuilder(X86::JMP_1)
-            .addExpr(MCSymbolRefExpr::create(sym_target_e, OutContext)));
-
-          OutStreamer->EmitLabel(sym_label_e);
-
-          // restore rax
-          if (save_rax_after) {
-            EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
-              .addOperand(MCOperand::createReg(X86::RAX))
-              .addOperand(MCOperand::createReg(X86::R14)));
-          }
+          // Check whether we need to save&restore rax after a call instruction.
+          MachineBasicBlock::const_iterator MBBI(MI);
+          EmitTsxSpringCall(".call.end", CA.isRAXSrcAfterCall(MBB->getNumber(), std::distance(MBB->begin(), MBBI)));
         }
 
         return;
