@@ -1101,7 +1101,11 @@ MCSymbol* X86AsmPrinter::EmitTsxSpringLoop(const MachineBasicBlock* targetBasicB
   if (saveRax) {
     EmitSaveRax();
   }
-  return EmitTsxSpringboard(Twine(targetBasicBlock->getNumber()), MI->getOpcode());
+
+  int opcode =  MI == nullptr ? X86::JMP_1 : MI->getOpcode();
+  
+    
+  return EmitTsxSpringboard(Twine(targetBasicBlock->getNumber()), opcode);
 }
 
 // Use this for prefixing and postfixing call instructions with springboard calls.
@@ -1145,7 +1149,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
           // jmp to the springboard.
           if (insert_jmp) {
             DEBUG(dbgs() << "Last basic block ends with conditional branch or no branch\n");
-            EmitTsxSpringLoop(MBB, MI, bb_save_rax);
+            EmitTsxSpringLoop(MBB, nullptr, bb_save_rax);
             bb_save_rax = false;
           }
           insert_jmp = false;
@@ -1268,8 +1272,10 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       // Care is made to preserve rax across a split.
       if (MI->isCall()) {
         int way_usage = CA.getBBCacheWayUsage(MBB->getNumber());
-        bool call_opt = way_usage <= 4;
+        //bool call_opt = way_usage <= 4;
 
+	bool call_opt = false;
+	
         if (!call_opt) {
           bool save_rax_before = false;
           // Check if it is a indirect call.
