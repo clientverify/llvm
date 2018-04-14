@@ -95,7 +95,7 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
    explicit X86AsmPrinter(TargetMachine &TM,
                           std::unique_ptr<MCStreamer> Streamer)
        : AsmPrinter(TM, std::move(Streamer)), SM(*this), FM(*this),
-         CA(), SMShadowTracker(TM) {}
+         CA(), SMShadowTracker(TM), TaserFunctions() {}
 
   const char *getPassName() const override {
     return "X86 Assembly / Object Emitter";
@@ -126,6 +126,7 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   bool doInitialization(Module &M) override {
     SMShadowTracker.reset(0);
     SM.reset();
+    loadTaserFunctions();
     return AsmPrinter::doInitialization(M);
   }
 
@@ -133,16 +134,20 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
 
 private:
   bool usesRax(unsigned int reg) const;
-  MCSymbol* EmitTsxSpringboard(const Twine& suffix, unsigned int opcode);
+  MCSymbol* EmitTsxSpringboard(const Twine& suffix, unsigned int opcode, bool close=true);
   // Springboard for loop/branch analysis
   MCSymbol* EmitTsxSpringLoop(const MachineBasicBlock* targetBasicBlock, const MachineInstr *MI, bool saveRax);
   // Springboard before and after call instructions.
   MCSymbol* EmitTsxSpringCall(const Twine& suffix, bool saveAndRestoreRax);
+  void EmitTsxSpringClose();
+  MCSymbol* EmitTsxSpringOpen(const Twine& suffix, bool saveAndRestoreRax);
   MCSymbol* getMBBLabel(const MachineBasicBlock* targetBasicBlock);
   void EmitSaveRax();
   void EmitRestoreRax();
+  void loadTaserFunctions();
 
   unsigned int SpringboardCounter;
+  std::vector<std::string> TaserFunctions;
 };
 
 } // end namespace llvm

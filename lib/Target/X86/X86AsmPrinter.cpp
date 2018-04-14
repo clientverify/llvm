@@ -11,6 +11,11 @@
 // of machine-dependent LLVM code to X86 machine code.
 //
 //===----------------------------------------------------------------------===//
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <algorithm>
+
 #include "X86FrameLowering.h"
 #include "X86InstrBuilder.h"
 #include "X86Subtarget.h"
@@ -40,6 +45,7 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCInstBuilder.h"
 #include "llvm/Support/COFF.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -54,19 +60,37 @@
 
 using namespace llvm;
 
+
+std::string TaserFunctionsFile;
+static cl::opt<std::string, true>
+TaserFunctionsFlag("taser-out",
+  cl::desc("File holding names of TASER eligible functions"),
+  cl::value_desc("filename"),
+  cl::location(TaserFunctionsFile),
+  cl::ValueRequired);
+
 //===----------------------------------------------------------------------===//
 // Primitive Helper Functions.
 //===----------------------------------------------------------------------===//
+
+void X86AsmPrinter::loadTaserFunctions() {
+  std::ifstream is(TaserFunctionsFile, std::ios::in);
+  std::string line;
+  while(std::getline(is, line)) {
+    TaserFunctions.push_back(line);
+  }
+  std::sort(TaserFunctions.begin(), TaserFunctions.end());
+}
 
 /// runOnMachineFunction - Emit the function body.
 ///
 bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   Subtarget = &MF.getSubtarget<X86Subtarget>();
 
-#define DEBUG_TYPE "tsgx"
-  DEBUG(dbgs() << "TSGX processing function " << MF.getFunction()->getName() << "\n");
+#define DEBUG_TYPE "taser"
+  DEBUG(dbgs() << "TASER processing function " << MF.getFunction()->getName() << "\n");
 
-  // Initialize state for TSGX block splitter.
+  // Initialize state for TASER block splitter.
   SpringboardCounter = 0;
 
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
