@@ -67,6 +67,7 @@ TaserFunctionsFlag("taser-out",
   cl::desc("File holding names of TASER eligible functions"),
   cl::value_desc("filename"),
   cl::location(TaserFunctionsFile),
+  cl::Required,
   cl::ValueRequired);
 
 //===----------------------------------------------------------------------===//
@@ -217,10 +218,14 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
             ||(opc == X86::MOVZX32rm8)
             ||(opc == X86::MOVZX32rm16)
             )
-          {
-            fastCase = true;
-            //printf("\n MATCH \n");
-          };
+        {
+          fastCase = true;
+          //DEBUG(dbgs() << "\nMATCH\n");
+        }
+        else {
+          //DEBUG(dbgs() << "\nNOT MATCH\n");
+        }
+        //DEBUG(MI->Dump());
 
 
         if (MI->hasOneMemOperand()) {
@@ -247,7 +252,7 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
                 .addReg(newReg);
               BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRBrr)), X86::XMM3)
               .addReg(X86::XMM3)
-              .addReg(X86::R15)
+              .addReg(X86::R15D)
               .addImm(simd_index_8);
               simd_index_8 = (simd_index_8 + 1)%16;
               if (simd_index_8 == 0 ) {
@@ -267,7 +272,7 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
                 .addReg(newReg);
               BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRWrri)), X86::XMM4)
               .addReg(X86::XMM4)
-              .addReg(X86::R15W)
+              .addReg(X86::R15D)
               .addImm(simd_index_16);
               simd_index_16 = (simd_index_16 + 1)%8;
               if (simd_index_16 == 0 ) {
@@ -322,7 +327,7 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
                 .addReg(newReg);
               BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRWrri)), X86::XMM4)
               .addReg(X86::XMM4)
-              .addReg(X86::R15W)
+              .addReg(X86::R15D)
               .addImm(simd_index_16);
               simd_index_16 = (simd_index_16 + 1)%8;
               if (simd_index_16 == 0 ) {
@@ -379,7 +384,7 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
                 .addReg(newReg);
               BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRBrr)), X86::XMM3)
                 .addReg(X86::XMM3)
-                .addReg(X86::R15)
+                .addReg(X86::R15D)
                 .addImm(simd_index_8);
               simd_index_8 = (simd_index_8 + 1)%16;
               if (simd_index_8 == 0 ) {
@@ -398,7 +403,7 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
                 .addReg(newReg);
               BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRBrr)), X86::XMM3)
                 .addReg(X86::XMM3)
-                .addReg(X86::R15)
+                .addReg(X86::R15D)
                 .addImm(simd_index_8);
               simd_index_8 = (simd_index_8 + 1)%16;
               if (simd_index_8 == 0 ) {
@@ -416,7 +421,7 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
                 .addReg(newReg);
               BuildMI(*Curr_BB,Next_Instr,DL, (TII->get(X86::PINSRWrri)), X86::XMM4)
               .addReg(X86::XMM4)
-              .addReg(X86::R15W)
+              .addReg(X86::R15D)
               .addImm(simd_index_16);
               simd_index_16 = (simd_index_16 + 1)%8;
               if (simd_index_16 == 0 ) {
@@ -451,14 +456,14 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
               BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PINSRBrr)), X86::XMM3)
                 .addReg(X86::XMM3)
-                .addReg(X86::R15)
+                .addReg(X86::R15D)
                 .addImm(simd_index_8);
 
             simd_index_8 = (simd_index_8 + 1)%16;
 
             if (simd_index_8 == 0 ) {
               MachineInstrBuilder MIB_SIMDCMP = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PCMPEQBrr)),X86::XMM3)
-                .addReg(X86::XMM7)
+                .addReg(X86::XMM3)
                 .addReg(X86::XMM7);
 
                 MachineInstrBuilder MIDPOR = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PORrr)), X86::XMM1)
@@ -479,7 +484,7 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
             MachineInstrBuilder MIB_SIMD = BuildMI(*Curr_BB,MI,DL, (TII->get(X86::PINSRWrri)), X86::XMM4)
               .addReg(X86::XMM4)
-              .addReg(X86::R15)
+              .addReg(X86::R15D)
               .addImm(simd_index_16);
 
             simd_index_16 = (simd_index_16 + 1)%8;
