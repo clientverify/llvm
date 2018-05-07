@@ -1079,7 +1079,7 @@ void X86AsmPrinter::EmitRestoreRax() {
     .addOperand(MCOperand::createReg(X86::R14)));
 }
 
-MCSymbol* X86AsmPrinter::EmitTsxSpringboard(const Twine& suffix,  unsigned int opcode, bool close) {
+MCSymbol* X86AsmPrinter::EmitTsxSpringboard(const Twine& suffix,  unsigned int opcode, const Twine& springName) {
   MCSymbol *resume = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + suffix);
   EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
     .addOperand(MCOperand::createReg(X86::R15))
@@ -1091,7 +1091,7 @@ MCSymbol* X86AsmPrinter::EmitTsxSpringboard(const Twine& suffix,  unsigned int o
 
   // Either close the previous transaction or jump to the middle of the springboard and
   // only open a new one.
-  MCSymbol *spring = OutContext.getOrCreateSymbol(close ? "sb.entry" : "sb.entry.ex");
+  MCSymbol *spring = OutContext.getOrCreateSymbol(springName);
 
   EmitAndCountInstruction(MCInstBuilder(opcode)
     .addExpr(MCSymbolRefExpr::create(spring, OutContext)));
@@ -1105,7 +1105,7 @@ MCSymbol* X86AsmPrinter::EmitTsxSpringLoop(const MachineBasicBlock* targetBasicB
   }
 
   unsigned opcode = (MI == nullptr) ? unsigned(X86::JMP_1) : MI->getOpcode();
-  return EmitTsxSpringboard(Twine(targetBasicBlock->getNumber()), opcode);
+  return EmitTsxSpringboard(Twine(targetBasicBlock->getNumber()), opcode, "sb.reopen");
 }
 
 // Use this for prefixing and postfixing call instructions with springboard calls.
@@ -1115,7 +1115,7 @@ MCSymbol* X86AsmPrinter::EmitTsxSpringCall(const Twine& suffix, bool saveAndRest
     EmitSaveRax();
   }
 
-  MCSymbol* resume = EmitTsxSpringboard("call." + suffix + "." + Twine(++SpringboardCounter), X86::JMP_1);
+  MCSymbol* resume = EmitTsxSpringboard("call." + suffix + "." + Twine(++SpringboardCounter), X86::JMP_1, "sb.reopen");
   OutStreamer->EmitLabel(resume);
 
   if (saveAndRestoreRax) {
@@ -1124,16 +1124,19 @@ MCSymbol* X86AsmPrinter::EmitTsxSpringCall(const Twine& suffix, bool saveAndRest
   return resume;
 }
 
-void X86AsmPrinter::EmitTsxSpringClose() {
-  EmitAndCountInstruction(MCInstBuilder(X86::XEND));
+MCSymbol* X86AsmPrinter::EmitTsxSpringClose() {
+  // rax does not need to be saved.  A scaffold call will always return in rax - so rax should be dead.
+  MCSymbol* resume = EmitTsxSpringboard("scaffold.begin." + Twine(++SpringboardCounter), X86::JMP_1, "sb.exittran");
+  OutStreamer->EmitLabel(resume);
+  return resume;
 }
 
-MCSymbol* X86AsmPrinter::EmitTsxSpringOpen(const Twine& suffix, bool saveAndRestoreRax) {
+MCSymbol* X86AsmPrinter::EmitTsxSpringOpen(bool saveAndRestoreRax) {
   if (saveAndRestoreRax) {
     EmitSaveRax();
   }
 
-  MCSymbol* resume = EmitTsxSpringboard("scaffold." + suffix + "." + Twine(++SpringboardCounter), X86::JMP_1, false);
+  MCSymbol* resume = EmitTsxSpringboard("scaffold.end." + Twine(++SpringboardCounter), X86::JMP_1, "sb.entertran");
   OutStreamer->EmitLabel(resume);
 
   if (saveAndRestoreRax) {
@@ -1290,42 +1293,44 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       // Care is made to preserve rax across a split.
       if (MI->isCall()) {
         int way_usage = CA.getBBCacheWayUsage(MBB->getNumber());
-        //bool call_opt = way_usage <= 4;
-        bool call_opt = false;
+        bool call_opt = way_usage <= 4;
         bool is_instrumented = false;
+        bool save_rax_before = false;
 
-        if (!call_opt) {
-          bool save_rax_before = false;
-          // Check if it is a indirect call.
-          const MachineOperand &MO0 = MI->getOperand(0);
-          if (MO0.isReg()) {
-            int index = 0;
-            if (MI->getNumOperands() > 4 && MI->getOperand(1).isImm() &&
-                MI->getOperand(2).isReg() && MI->getOperand(3).isImm()) {
-              index = MI->getOperand(2).getReg();
-            }
-
-            save_rax_before = usesRax(MO0.getReg()) || usesRax(index);
-            // Local indirect jumps are always TSX instrumented.
-            is_instrumented = true;
-            DEBUG(dbgs() << "Call to indirect target based on: " << MO0.getReg() << "\n");
-          } else if (MO0.isMCSymbol()) {
-            // is_instrumented remains false - these are compiler intrinsics
-            // and until we figure out how to correctly handle them, we assume they
-            // run outside transactions on concrete values.
-            DEBUG(dbgs() << "Call to instrinsic: " << MO0.getMCSymbol()->getName() << "\n");
-          } else {
-            std::string callee_name = MCInstLowering.GetSymbolFromOperand(MO0)->getName().str();
-            is_instrumented = std::binary_search(TaserFunctions.begin(), TaserFunctions.end(), callee_name);
-            DEBUG(dbgs() << "Call to function: " << callee_name << "\n");
+        // Check if it is a indirect call.
+        const MachineOperand &MO0 = MI->getOperand(0);
+        if (MO0.isReg()) {
+          int index = 0;
+          if (MI->getNumOperands() > 4 && MI->getOperand(1).isImm() &&
+              MI->getOperand(2).isReg() && MI->getOperand(3).isImm()) {
+            index = MI->getOperand(2).getReg();
           }
-          if (is_instrumented) {
-            DEBUG(dbgs() << "Known instrumented call target\n");
+
+          save_rax_before = usesRax(MO0.getReg()) || usesRax(index);
+          // Local indirect jumps are always TSX instrumented.
+          is_instrumented = true;
+          DEBUG(dbgs() << "Call to indirect target based on: " << MO0.getReg() << "\n");
+        } else if (MO0.isMCSymbol()) {
+          // is_instrumented remains false - these are compiler intrinsics
+          // and until we figure out how to correctly handle them, we assume they
+          // run outside transactions on concrete values.
+          DEBUG(dbgs() << "Call to instrinsic: " << MO0.getMCSymbol()->getName() << "\n");
+        } else {
+          std::string callee_name = MCInstLowering.GetSymbolFromOperand(MO0)->getName().str();
+          is_instrumented = std::binary_search(TaserFunctions.begin(), TaserFunctions.end(), callee_name);
+          DEBUG(dbgs() << "Call to function: " << callee_name << "\n");
+        }
+
+        if (is_instrumented) {
+          DEBUG(dbgs() << "Known instrumented call target\n");
+          if (call_opt) {
+            DEBUG(dbgs() << "Optimizing away transaction\n");
+          } else {
             EmitTsxSpringCall("begin", save_rax_before);
-          } else {
-            DEBUG(dbgs() << "Scaffolding/external call target\n");
-            EmitTsxSpringClose();
           }
+        } else {
+          DEBUG(dbgs() << "Scaffolding/external call target\n");
+          EmitTsxSpringClose();
         }
 
         // For now, assume that anything we are compiling for instrumentation only
@@ -1339,15 +1344,15 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
         MCInstLowering.Lower(MI, CallInst);
         EmitAndCountInstruction(CallInst);
 
-        if (!call_opt) {
-          // Check whether we need to save & restore rax after a call instruction.
-          MachineBasicBlock::const_iterator MBBI(MI);
-          bool save_rax_after = CA.isRAXSrcAfterCall(MBB->getNumber(), std::distance(MBB->begin(), MBBI));
-          if (is_instrumented) {
+        // Check whether we need to save & restore rax after a call instruction.
+        MachineBasicBlock::const_iterator MBBI(MI);
+        bool save_rax_after = CA.isRAXSrcAfterCall(MBB->getNumber(), std::distance(MBB->begin(), MBBI));
+        if (is_instrumented) {
+          if (!call_opt) {
             EmitTsxSpringCall("end", save_rax_after);
-          } else {
-            EmitTsxSpringOpen("after", save_rax_after);
           }
+        } else {
+          EmitTsxSpringOpen(save_rax_after);
         }
 
         return;

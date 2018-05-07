@@ -134,13 +134,13 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
 
 private:
   bool usesRax(unsigned int reg) const;
-  MCSymbol* EmitTsxSpringboard(const Twine& suffix, unsigned int opcode, bool close=true);
+  MCSymbol* EmitTsxSpringboard(const Twine& suffix, unsigned int opcode, const Twine& springName);
   // Springboard for loop/branch analysis
   MCSymbol* EmitTsxSpringLoop(const MachineBasicBlock* targetBasicBlock, const MachineInstr *MI, bool saveRax);
   // Springboard before and after call instructions.
   MCSymbol* EmitTsxSpringCall(const Twine& suffix, bool saveAndRestoreRax);
-  void EmitTsxSpringClose();
-  MCSymbol* EmitTsxSpringOpen(const Twine& suffix, bool saveAndRestoreRax);
+  MCSymbol* EmitTsxSpringClose();
+  MCSymbol* EmitTsxSpringOpen(bool saveAndRestoreRax);
   MCSymbol* getMBBLabel(const MachineBasicBlock* targetBasicBlock);
   void EmitSaveRax();
   void EmitRestoreRax();
