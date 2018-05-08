@@ -95,7 +95,10 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
    explicit X86AsmPrinter(TargetMachine &TM,
                           std::unique_ptr<MCStreamer> Streamer)
        : AsmPrinter(TM, std::move(Streamer)), SM(*this), FM(*this),
-         CA(), SMShadowTracker(TM), TaserFunctions() {}
+         CA(), SMShadowTracker(TM), TaserFunctions() {
+           // Clear poison checking indices before the first block.
+           std::fill(std::begin(SimdIndex), std::end(SimdIndex), 0);
+         }
 
   const char *getPassName() const override {
     return "X86 Assembly / Object Emitter";
@@ -109,7 +112,13 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
 
   void EmitInstruction(const MachineInstr *MI) override;
 
+  void EmitBasicBlockStart(const MachineBasicBlock &MBB) override;
+
   void EmitBasicBlockEnd(const MachineBasicBlock &MBB) override {
+    // Reset Poison checking indices for the next block.
+    // TODO: Change this to an assert. We should have already accumulated all
+    // the poison we encountered by this point.
+    std::fill(std::begin(SimdIndex), std::end(SimdIndex), 0);
     SMShadowTracker.emitShadowPadding(*OutStreamer, getSubtargetInfo());
   }
 
@@ -133,7 +142,6 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   bool runOnMachineFunction(MachineFunction &F) override;
 
 private:
-  bool usesRax(unsigned int reg) const;
   MCSymbol* EmitTsxSpringboard(const Twine& suffix, unsigned int opcode, const Twine& springName);
   // Springboard for loop/branch analysis
   MCSymbol* EmitTsxSpringLoop(const MachineBasicBlock* targetBasicBlock, const MachineInstr *MI, bool saveRax);
@@ -145,8 +153,31 @@ private:
   void EmitSaveRax();
   void EmitRestoreRax();
   void loadTaserFunctions();
+  void EmitInstructionCore(const MachineInstr *MI, X86MCInstLower &MCInstLowering);
+  // Returns whether core instruction processing should be run.
+  bool EmitInstrumentedInstruction(const MachineInstr *MI, X86MCInstLower &MCIL);
+  void EmitPoisonAccumulate(unsigned int offset);
+  void EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL, bool before);
+
+  unsigned int getPhysRegSize(unsigned int reg) const;
+  bool usesRax(unsigned int reg) const {
+    return getX86SubSuperRegisterOrZero(reg, MVT::i64) == X86::RAX;
+  }
+
+  unsigned int getOffsetForSize(unsigned int size) const {
+    switch (size) {
+      case 1: return 0;
+      case 2: return 1;
+      case 4: return 2;
+      case 8: return 3;
+      default:
+        llvm_unreachable("Cannot handler non-standard register sizes");
+    }
+  }
 
   unsigned int SpringboardCounter;
+  // Convention - index i corresponds to poison storage for operand size 2^i.
+  unsigned int SimdIndex[4];
   std::vector<std::string> TaserFunctions;
 };
 

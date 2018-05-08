@@ -23,10 +23,12 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/GlobalValue.h"
@@ -1052,42 +1054,54 @@ static std::string getShuffleComment(const MachineOperand &DstOp,
   return Comment;
 }
 
-bool insert_jmp = false;
-bool bb_save_rax = false;
-
-bool X86AsmPrinter::usesRax(unsigned reg) const {
-  switch (reg) {
-  case X86::AL:
-  case X86::AX:
-  case X86::EAX:
-  case X86::RAX:
-    return true;
-  default:
-    return false;
+void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
+  X86MCInstLower MCInstLowering(*MF, *this);
+  const Function *F = MF->getFunction();
+  if (F->hasMetadata()) {
+    MDNode *node = F->getMetadata("taser.fun.info");
+    if ((cast<MDString>(node->getOperand(0))->getString() == "instrumented")) {
+      EmitPoisonCheck(MI, MCInstLowering, true);
+      // Only instrument functions that are tagged to be instrumented.
+      if (EmitInstrumentedInstruction(MI, MCInstLowering)) {
+        EmitInstructionCore(MI, MCInstLowering);
+      }
+      EmitPoisonCheck(MI, MCInstLowering, false);
+    }
+  } else {
+    EmitInstructionCore(MI, MCInstLowering);
   }
 }
 
+//===----------------------------------------------------------------------===//
+// Transaction Batching and Springboarding.
+//===----------------------------------------------------------------------===//
+#define DEBUG_TYPE "taser"
+
+// Clean this up at some point once we figure out how the loop splitting works.
+bool insert_jmp = false;
+bool bb_save_rax = false;
+
 void X86AsmPrinter::EmitSaveRax() {
   EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
-    .addOperand(MCOperand::createReg(X86::R14))
-    .addOperand(MCOperand::createReg(X86::RAX)));
+    .addReg(X86::R14)
+    .addReg(X86::RAX));
 }
 
 void X86AsmPrinter::EmitRestoreRax() {
   EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
-    .addOperand(MCOperand::createReg(X86::RAX))
-    .addOperand(MCOperand::createReg(X86::R14)));
+    .addReg(X86::RAX)
+    .addReg(X86::R14));
 }
 
 MCSymbol* X86AsmPrinter::EmitTsxSpringboard(const Twine& suffix,  unsigned int opcode, const Twine& springName) {
   MCSymbol *resume = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + suffix);
   EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
-    .addOperand(MCOperand::createReg(X86::R15))
-    .addOperand(MCOperand::createReg(X86::RIP))               // base
-    .addOperand(MCOperand::createImm(0))                      // scale
-    .addOperand(MCOperand::createReg(0))                      // index
+    .addReg(X86::R15)
+    .addReg(X86::RIP)               // base
+    .addImm(0)                      // scale
+    .addReg(X86::NoRegister)        // index
     .addExpr(MCSymbolRefExpr::create(resume, OutContext))     // disp
-    .addOperand(MCOperand::createReg(0)));                    // seg
+    .addReg(X86::NoRegister));      // seg
 
   // Either close the previous transaction or jump to the middle of the springboard and
   // only open a new one.
@@ -1149,220 +1163,405 @@ MCSymbol* X86AsmPrinter::getMBBLabel(const MachineBasicBlock* targetBasicBlock) 
   return OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(targetBasicBlock->getNumber()));
 }
 
-void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
+void X86AsmPrinter::EmitBasicBlockStart(const MachineBasicBlock &MBB) {
+  AsmPrinter::EmitBasicBlockStart(MBB);
 
-  X86MCInstLower MCInstLowering(*MF, *this);
-  const X86RegisterInfo *RI = MF->getSubtarget<X86Subtarget>().getRegisterInfo();
+  if (MBB.getNumber() != 0) {
+    // If last basic block ends with an conditional jmp or without branch, insert additional
+    // jmp to the springboard.
+    if (insert_jmp) {
+      DEBUG(dbgs() << "Last basic block ends with conditional branch or no branch\n");
+      EmitTsxSpringLoop(&MBB, nullptr, bb_save_rax);
+      bb_save_rax = false;
+    }
+    insert_jmp = false;
+    // Always insert label in the beginning of the basic block.
+    OutStreamer->EmitLabel(getMBBLabel(&MBB));
+  }
 
-#define DEBUG_TYPE "taser"
+  // If the current basic block using RAX as soruce, insert restore rax instruction.
+  if (CA.isRAXSrc(MBB.getNumber())) {
+    EmitRestoreRax();
+  }
+}
 
-  const Function *F = MF->getFunction();
+bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCInstLower &MCIL) {
   const MachineBasicBlock *MBB = MI->getParent();
   MachineLoopInfo *MLI = AsmPrinter::LI;
-  if (F->hasMetadata()) {
-    MDNode *node = F->getMetadata("taser.fun.info");
-    if ((cast<MDString>(node->getOperand(0))->getString() == "instrumented")) {
-      // Only instrument functions that are tagged to be instrumented.
-      if (MI == MBB->begin()) {
-        DEBUG(dbgs() << "EmitInstruction::found first instr in " << MBB->getName() << ":" << MF->getName() << "\n");
-        if (MBB->getNumber() != 0) {
-          // If last basic block ends with an conditional jmp or without branch, insert additional
-          // jmp to the springboard.
-          if (insert_jmp) {
-            DEBUG(dbgs() << "Last basic block ends with conditional branch or no branch\n");
-            EmitTsxSpringLoop(MBB, nullptr, bb_save_rax);
-            bb_save_rax = false;
-          }
-          insert_jmp = false;
-          // Always insert label in the beginning of the basic block.
-          OutStreamer->EmitLabel(getMBBLabel(MBB));
-        }
 
-        // If the current basic block using RAX as soruce, insert restore rax instruction.
-        if (CA.isRAXSrc(MBB->getNumber())) {
-          EmitRestoreRax();
-        }
-
-      } // end of insertion at the beginning of the basic block
-
-      // Basic block level split
-      // Split with optimization.
-      // Split by loop strategy:
-      // 1. Beginning of the loop: If the branch target is a loop header.
-      // 2. End of the loop: If the branch target is right after the loop ends.
-
-      bool is_loop_header = false;
-      const MachineLoop *loop = MLI->getLoopFor(MBB);
-      if (loop) {
-        MachineBasicBlock *header = loop->getHeader();
-        if (header == MBB) {
-          is_loop_header = true;
-        }
-      }
-
-      // Loop split stragegy 1.
-      if (MI->isBranch()) {
-        DEBUG(dbgs() << "Found branch in " << MBB->getName() << "\n");
-        if (MI->getOperand(0).isMBB()) {
-          const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
-          DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName() << "\n");
-          int way_usage = CA.getJointBBCacheWayUsage(MBB->getNumber(), target_mbb->getNumber());
-
-          const MachineLoop *target_loop = MLI->getLoopFor(target_mbb);
-          if (target_loop) {
-            MachineBasicBlock *target_header = target_loop->getHeader();
-            if ((way_usage > 7) ||
-                ((target_header == target_mbb) && (target_loop != loop))) {
-              DEBUG(dbgs() << "the target is loop header\n");
-              EmitTsxSpringLoop(target_mbb, MI, CA.isRAXDst(MBB->getNumber()));
-              return;
-            }
-          }
-        }
-      } // end of loop split strategy 1
-
-      // Loop split strategy 2.
-      // First, check if the current basicblock is a loop header as
-      // a loop always ends in a loop header.
-
-      // Then, check the branch target.
-      // If the branch target is in the same loop, it means that the target is the loop body.
-      // We do nothing for this case.
-      // If the branch target is in the different loop or is not in the loop, it means that
-      // the target is only executed after the loop ends. We do split in this case.
-      if (is_loop_header) {
-        if (MI->isBranch()) {
-          DEBUG(dbgs() << "Found branch in loop header " << MBB->getName() << "\n");
-          if (MI->getOperand(0).isMBB()) {
-            const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
-            DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName() << "\n");
-            int way_usage = CA.getJointBBCacheWayUsage(MBB->getNumber(), target_mbb->getNumber());
-
-            // If the jump target is not inside a loop or in different loop means that
-            // it is the end of current loop.
-            const MachineLoop *target_loop  = MLI->getLoopFor(target_mbb);
-            if ((way_usage > 7) || !target_loop || (target_loop != loop)) {
-              DEBUG(dbgs() << "The branch is at the end of the loop " << MBB->getName() << "\n");
-              // If current basic block use rax as destination save the rax at the end.
-              EmitTsxSpringLoop(target_mbb, MI, CA.isRAXDst(MBB->getNumber()));
-              return;
-            }
-
-            DEBUG(dbgs()<< "special case on " << MF->getName() << ":" << MBB->getNumber() <<"\n");
-            MachineBasicBlock::const_iterator MBBI(MI);
-            if (++MBBI == MBB->end()) {
-              insert_jmp = true;
-              // If current basic block use rax as destination save the rax at the end.
-              if (CA.isRAXDst(MBB->getNumber())) {
-                DEBUG(dbgs() << "[EmitInstruction] RAX used as dst on BB: " << MBB->getNumber() << "\n");
-                bb_save_rax = true;
-              }
-            }
-          }
-        }
-      } // end of is loop hedaer
-
-      // For the remaining branch, make sure the target is own-defined label.
-      if (MI->isBranch()) {
-        DEBUG(dbgs() << "Found branch in " << MBB->getName() << "\n");
-        if (MI->getOperand(0).isMBB()) {
-          const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
-          DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName() << "\n");
-
-          // If current basic block use rax as destination, we save the rax at the end.
-          if (CA.isRAXDst(MBB->getNumber())) {
-            EmitSaveRax();
-          }
-          EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
-            .addExpr(MCSymbolRefExpr::create(getMBBLabel(target_mbb), OutContext)));
-          return;
-        }
-      }
-      // Basic block level split end
-
-
-      // Instructions are always split as follows:
-      //   lea call_label.begin, %r15
-      //   jmp springboard
-      // call_label.begin:
-      //   call fun
-      // call_label.end:
-      //   lea call_label.end, %r15
-      //   jmp springboard
-      //
-      // Care is made to preserve rax across a split.
-      if (MI->isCall()) {
-        int way_usage = CA.getBBCacheWayUsage(MBB->getNumber());
-        bool call_opt = way_usage <= 4;
-        bool is_instrumented = false;
-        bool save_rax_before = false;
-
-        // Check if it is a indirect call.
-        const MachineOperand &MO0 = MI->getOperand(0);
-        if (MO0.isReg()) {
-          int index = 0;
-          if (MI->getNumOperands() > 4 && MI->getOperand(1).isImm() &&
-              MI->getOperand(2).isReg() && MI->getOperand(3).isImm()) {
-            index = MI->getOperand(2).getReg();
-          }
-
-          save_rax_before = usesRax(MO0.getReg()) || usesRax(index);
-          // Local indirect jumps are always TSX instrumented.
-          is_instrumented = true;
-          DEBUG(dbgs() << "Call to indirect target based on: " << MO0.getReg() << "\n");
-        } else if (MO0.isMCSymbol()) {
-          // is_instrumented remains false - these are compiler intrinsics
-          // and until we figure out how to correctly handle them, we assume they
-          // run outside transactions on concrete values.
-          DEBUG(dbgs() << "Call to instrinsic: " << MO0.getMCSymbol()->getName() << "\n");
-        } else {
-          std::string callee_name = MCInstLowering.GetSymbolFromOperand(MO0)->getName().str();
-          is_instrumented = std::binary_search(TaserFunctions.begin(), TaserFunctions.end(), callee_name);
-          DEBUG(dbgs() << "Call to function: " << callee_name << "\n");
-        }
-
-        if (is_instrumented) {
-          DEBUG(dbgs() << "Known instrumented call target\n");
-          if (call_opt) {
-            DEBUG(dbgs() << "Optimizing away transaction\n");
-          } else {
-            EmitTsxSpringCall("begin", save_rax_before);
-          }
-        } else {
-          DEBUG(dbgs() << "Scaffolding/external call target\n");
-          EmitTsxSpringClose();
-        }
-
-        // For now, assume that anything we are compiling for instrumentation only
-        // calls other functions that either need instrumentation or are
-        // instrumentation aware (i.e. scaffolding functions).
-        // If there are special klee_ or uclibc functions that need to be special
-        // cased, that would happen here.
-        //
-        // Ignore shadow map tracking - oh well :(
-        MCInst CallInst;
-        MCInstLowering.Lower(MI, CallInst);
-        EmitAndCountInstruction(CallInst);
-
-        // Check whether we need to save & restore rax after a call instruction.
-        MachineBasicBlock::const_iterator MBBI(MI);
-        bool save_rax_after = CA.isRAXSrcAfterCall(MBB->getNumber(), std::distance(MBB->begin(), MBBI));
-        if (is_instrumented) {
-          if (!call_opt) {
-            EmitTsxSpringCall("end", save_rax_after);
-          }
-        } else {
-          EmitTsxSpringOpen(save_rax_after);
-        }
-
-        return;
-      } // end of call-level split
-    } // end of all instrumentation
+  if (MI == MBB->begin()) {
+    DEBUG(dbgs() << "EmitInstruction::found first instr in " << MBB->getName() << ":" << MF->getName() << "\n");
   }
+
+  // Basic block level split
+  // Split with optimization.
+  // Split by loop strategy:
+  // 1. Beginning of the loop: If the branch target is a loop header.
+  // 2. End of the loop: If the branch target is right after the loop ends.
+
+  bool is_loop_header = false;
+  const MachineLoop *loop = MLI->getLoopFor(MBB);
+  if (loop) {
+    MachineBasicBlock *header = loop->getHeader();
+    if (header == MBB) {
+      is_loop_header = true;
+    }
+  }
+
+  // Loop split stragegy 1.
+  if (MI->isBranch()) {
+    DEBUG(dbgs() << "Found branch in " << MBB->getName() << "\n");
+    if (MI->getOperand(0).isMBB()) {
+      const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
+      DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName() << "\n");
+      int way_usage = CA.getJointBBCacheWayUsage(MBB->getNumber(), target_mbb->getNumber());
+
+      const MachineLoop *target_loop = MLI->getLoopFor(target_mbb);
+      if (target_loop) {
+        MachineBasicBlock *target_header = target_loop->getHeader();
+        if ((way_usage > 7) ||
+            ((target_header == target_mbb) && (target_loop != loop))) {
+          DEBUG(dbgs() << "the target is loop header\n");
+          EmitTsxSpringLoop(target_mbb, MI, CA.isRAXDst(MBB->getNumber()));
+          return false;
+        }
+      }
+    }
+  } // end of loop split strategy 1
+
+  // Loop split strategy 2.
+  // First, check if the current basicblock is a loop header as
+  // a loop always ends in a loop header.
+
+  // Then, check the branch target.
+  // If the branch target is in the same loop, it means that the target is the loop body.
+  // We do nothing for this case.
+  // If the branch target is in the different loop or is not in the loop, it means that
+  // the target is only executed after the loop ends. We do split in this case.
+  if (is_loop_header) {
+    if (MI->isBranch()) {
+      DEBUG(dbgs() << "Found branch in loop header " << MBB->getName() << "\n");
+      if (MI->getOperand(0).isMBB()) {
+        const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
+        DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName() << "\n");
+        int way_usage = CA.getJointBBCacheWayUsage(MBB->getNumber(), target_mbb->getNumber());
+
+        // If the jump target is not inside a loop or in different loop means that
+        // it is the end of current loop.
+        const MachineLoop *target_loop  = MLI->getLoopFor(target_mbb);
+        if ((way_usage > 7) || !target_loop || (target_loop != loop)) {
+          DEBUG(dbgs() << "The branch is at the end of the loop " << MBB->getName() << "\n");
+          // If current basic block use rax as destination save the rax at the end.
+          EmitTsxSpringLoop(target_mbb, MI, CA.isRAXDst(MBB->getNumber()));
+          return false;
+        }
+
+        DEBUG(dbgs()<< "special case on " << MF->getName() << ":" << MBB->getNumber() <<"\n");
+        MachineBasicBlock::const_iterator MBBI(MI);
+        if (++MBBI == MBB->end()) {
+          insert_jmp = true;
+          // If current basic block use rax as destination save the rax at the end.
+          if (CA.isRAXDst(MBB->getNumber())) {
+            DEBUG(dbgs() << "[EmitInstruction] RAX used as dst on BB: " << MBB->getNumber() << "\n");
+            bb_save_rax = true;
+          }
+        }
+      }
+    }
+  } // end of is loop hedaer
+
+  // For the remaining branch, make sure the target is own-defined label.
+  if (MI->isBranch()) {
+    DEBUG(dbgs() << "Found branch in " << MBB->getName() << "\n");
+    if (MI->getOperand(0).isMBB()) {
+      const MachineBasicBlock *target_mbb = MI->getOperand(0).getMBB();
+      DEBUG(dbgs() << "The branch target is basicblock: " << target_mbb->getName() << "\n");
+
+      // If current basic block use rax as destination, we save the rax at the end.
+      if (CA.isRAXDst(MBB->getNumber())) {
+        EmitSaveRax();
+      }
+      EmitAndCountInstruction(MCInstBuilder(MI->getOpcode())
+        .addExpr(MCSymbolRefExpr::create(getMBBLabel(target_mbb), OutContext)));
+      return false;
+    }
+  }
+  // Basic block level split end
+
+
+  // Instructions are always split as follows:
+  //   lea call_label.begin, %r15
+  //   jmp springboard
+  // call_label.begin:
+  //   call fun
+  // call_label.end:
+  //   lea call_label.end, %r15
+  //   jmp springboard
+  //
+  // Care is made to preserve rax across a split.
+  if (MI->isCall()) {
+    int way_usage = CA.getBBCacheWayUsage(MBB->getNumber());
+    bool call_opt = way_usage <= 4;
+    bool is_instrumented = false;
+    bool save_rax_before = false;
+
+    // Check if it is a indirect call.
+    const MachineOperand &MO0 = MI->getOperand(0);
+    if (MO0.isReg()) {
+      int index = X86::NoRegister;
+      if (MI->getNumOperands() > 4 && MI->getOperand(1).isImm() &&
+          MI->getOperand(2).isReg() && MI->getOperand(3).isImm()) {
+        index = MI->getOperand(2).getReg();
+      }
+
+      save_rax_before = usesRax(MO0.getReg()) || usesRax(index);
+      // Local indirect jumps are always TSX instrumented.
+      is_instrumented = true;
+      DEBUG(dbgs() << "Call to indirect target based on: " << MO0.getReg() << "\n");
+    } else if (MO0.isMCSymbol()) {
+      // is_instrumented remains false - these are compiler intrinsics
+      // and until we figure out how to correctly handle them, we assume they
+      // run outside transactions on concrete values.
+      DEBUG(dbgs() << "Call to instrinsic: " << MO0.getMCSymbol()->getName() << "\n");
+    } else {
+      std::string callee_name = MCIL.GetSymbolFromOperand(MO0)->getName().str();
+      is_instrumented = std::binary_search(TaserFunctions.begin(), TaserFunctions.end(), callee_name);
+      DEBUG(dbgs() << "Call to function: " << callee_name << "\n");
+    }
+
+    if (is_instrumented) {
+      DEBUG(dbgs() << "Known instrumented call target\n");
+      if (call_opt) {
+        DEBUG(dbgs() << "Optimizing away transaction\n");
+      } else {
+        EmitTsxSpringCall("begin", save_rax_before);
+      }
+    } else {
+      DEBUG(dbgs() << "Scaffolding/external call target\n");
+      EmitTsxSpringClose();
+    }
+
+    // For now, assume that anything we are compiling for instrumentation only
+    // calls other functions that either need instrumentation or are
+    // instrumentation aware (i.e. scaffolding functions).
+    // If there are special klee_ or uclibc functions that need to be special
+    // cased, that would happen here.
+    //
+    // Ignore shadow map tracking - oh well :(
+    MCInst CallInst;
+    MCIL.Lower(MI, CallInst);
+    EmitAndCountInstruction(CallInst);
+
+    // Check whether we need to save & restore rax after a call instruction.
+    MachineBasicBlock::const_iterator MBBI(MI);
+    bool save_rax_after = CA.isRAXSrcAfterCall(MBB->getNumber(), std::distance(MBB->begin(), MBBI));
+    if (is_instrumented) {
+      if (!call_opt) {
+        EmitTsxSpringCall("end", save_rax_after);
+      }
+    } else {
+      EmitTsxSpringOpen(save_rax_after);
+    }
+
+    return false;
+  } // end of call-level split
+
+  return true;
+}
+
+
+//===----------------------------------------------------------------------===//
+// Poison Checking.
+//===----------------------------------------------------------------------===//
+
+/*
+  Big picture here is that we add "safe" (doesn't change flags or the output of a program)
+  instrumentation whenever an X86_64 instruction directly or indirectly depends on a value from
+  memory.
+
+  The idea is that we add poison SIMD-based poison checking by storing the value from memory in
+  a SIMD register, and check it later before the current transaction is committed to
+  make sure it isn't poison.
+
+  We assume that registers r14 and r15 are reserved and unavailable to the binary we're instrumenting,
+  as done in t-sgx.  We also assume that the SIMD registers are unavailable to the target program,
+  since we use them for poison checking.  We're also assuming that alignment is enforced, ex that
+  quad word values are stored on 8 byte boundaries, longs are stored on 4 byte boundaries, etc;
+  we'll need to thing about how to deal with this on packed structs where alignment may be off.
+
+  Right now, we assume a two-byte poison value is used, and stored repeatedly in XMM7.
+  To avoid issues with checking the alignment of values that are read, we have separate SIMD
+  registers for each of the 4 possible data sizes in x86_64.  The result of the poison checks
+  are OR'd with XMM1, which serves as an indicator variable that contains at least one "1" value
+  if any poison is encountered in a transaction.
+
+  Byte values that are read are stored in XMM3.  Word (2 byte) values are stored in XMM4,
+  long/double word (4 byte) values are stored in XMM5, and quad word (8 byte) values are
+  stored in XMM6.
+
+  I haven't chosen the SIMD registers off any particular convention, but if we change them
+  we'll need to update the springboard.s file as well.  In springboard.s, we have have an
+  extra check at the end of every transaction to make sure there's no poison in XMM3-XMM6.
+
+  Note that the checks we add depend on the ManchineInstr function "mayLoad()" that checks
+  to see if a given X86 function uses data from memory.  I believe this returns TRUE even
+  if a memory value is just implicitly used, but we'll need to double check that at some
+  point.
+
+  Further down, you'll notice there are two cases for instrumentation -- the fast case, and
+  the slow case.  Fast cases are used when we need to instrument an instruction that performs
+  a move from memory that we can use to recover the value read, ex MOVQ (%r11), %r12 in AT&T syntax.
+  In that case, we can just move from r12 into a SIMD register for checking later.
+
+  However, if an instruction doesn't explicitly load a "clean copy" of the memory it operates on -- ex ADDQ $5, (%RAX) -- we need
+  to pay for a load from the address in %RAX to a SIMD register for poison checking before the memory
+  value is operated on.  This is the slow case.
+
+  Finally, note that we record the number of values loaded into SIMD registers in SIMD_index_X  based on the size X
+  of the value read from memory.  When we've filled up a 128-bit SIMD register, we need to check it for poison before
+  we load it with more values.  We do this by checking the values against the poison SIMD register XMM7, and bitwise
+  OR-ing the result into XMM1.
+*/
+
+// IMPORTANT To-do -- Need to add extra check around CALL and RET boundaries to check the four SIMD registers for poison
+// and OR the results into XMM1.
+// To do:  Make sure adding instructions while also using instruction iterators doesn't mess anything up.
+// Also double check that this is OK with bundles!!!
+// Also check that instructions at end of BB get paired with their "check" instructions. Do this via bundles.
+
+static const unsigned int MOVrr[] = {X86::MOV8rr, X86::MOV16rr, X86::MOV32rr, X86::MOV64rr};
+static const unsigned int MOVrm[] = {X86::MOV8rm, X86::MOV16rm, X86::MOV32rm, X86::MOV64rm};
+static const unsigned int PINSR[] = {X86::PINSRBrr, X86::PINSRWrri, X86::PINSRDrr, X86::PINSRQrr};
+static const unsigned int R15_SIZED[] = {X86::R15B, X86::R15W, X86::R15D, X86::R15};
+static const unsigned int POISON_STORE[] = {X86::XMM3, X86::XMM4, X86::XMM5, X86::XMM6};
+static const unsigned int POISON_REFERENCE = X86::XMM7;
+static const unsigned int POISON_ACCUMULATOR = X86::XMM1;
+static const unsigned int FAST_OPS[] = {
+  X86::MOV64rm, X86::MOV32rm, X86::MOV16rm, X86::MOV8rm,
+  X86::POP16r, X86::POP32r, X86::POP64r,
+  X86::MOVZX16rm8, X86::MOVZX32rm8, X86::MOVZX32rm16};
+
+void X86AsmPrinter::EmitPoisonAccumulate(unsigned int offset) {
+  if (SimdIndex[offset] == 0) {
+    // Compare in 2 byte chunks except for byte values.
+    EmitAndCountInstruction(MCInstBuilder(offset ? X86::PCMPEQWrr : X86::PCMPEQBrr)
+      .addReg(POISON_STORE[offset])
+      .addReg(POISON_STORE[offset])
+      .addReg(POISON_REFERENCE));
+    EmitAndCountInstruction(MCInstBuilder(X86::PORrr)
+      .addReg(POISON_ACCUMULATOR)
+      .addReg(POISON_ACCUMULATOR)
+      .addReg(POISON_STORE[offset]));
+  }
+}
+
+// This function is run twice - once before and once after instruction emission.
+void X86AsmPrinter::EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL, bool before) {
+  unsigned int opc = MI->getOpcode();
+
+  // These are some special and common "fast-case" operations, where
+  // we can grab the value read from memory after it's stored in a register
+  // and store it for poison checking.  That's a LOT faster than paying
+  // for an extra read from memory.
+  // At some point we'll want to try and include more instructions for this
+  // optimization.
+  bool fastPath = std::find(std::begin(FAST_OPS), std::end(FAST_OPS), opc) != std::end(FAST_OPS);
+
+  // Fast path instructions are checked after they are run. Hence delay any other
+  // fall-through block termination poison accumulation logic until after the instruction.
+  // Similarly, don't rexamine the instruction after it has been emitted if it is not a fast
+  // path instruction.
+  if ((fastPath && before) || (!fastPath && !before)) {
+    return;
+  }
+
+  // If the instruction can load from memory, check the value.
+  if (MI->mayLoad()) {
+    unsigned int readSize = 0;
+    unsigned int offset = 0;
+
+    if (!MI->memoperands_empty()) {
+      readSize = (*MI->memoperands_begin())->getSize();
+      offset = getOffsetForSize(readSize);
+    }
+
+    if (fastPath || readSize) {
+      if (fastPath) {
+        // In case the read involved sign extension or one of the "h" registers,
+        // just move the read value into r15 temporarily.  Then we can only use
+        // the size of memory that was read to compute the taint size.
+        unsigned newReg = MI->getOperand(0).getReg();
+        unsigned newSize = getPhysRegSize(newReg);
+        unsigned newOffset = getOffsetForSize(newSize);
+
+        // If readSize is unavailable due to implicit operands (pop for example),
+        // assign it here.
+        if (!readSize) {
+          readSize = newSize;
+          offset = newOffset;
+        }
+
+        EmitAndCountInstruction(MCInstBuilder(MOVrr[newOffset])
+          .addReg(R15_SIZED[newOffset])
+          .addReg(newReg));
+      } else {
+        // Slow case
+        // The second parameter (opcode) is unused on x86.
+        int firstOpIndex = X86II::getMemoryOperandNo(MI->getDesc().TSFlags, 0);
+        firstOpIndex += X86II::getOperandBias(MI->getDesc());
+
+        // The displacement could be an immediate or a symbol expression.  So explicitly
+        // lower it using our MCIL.
+        const MachineOperand &MODisp = MI->getOperand(firstOpIndex + X86::AddrDisp);
+        EmitAndCountInstruction(MCInstBuilder(MOVrm[offset])
+          .addReg(R15_SIZED[offset])
+          .addReg(MI->getOperand(firstOpIndex + X86::AddrBaseReg).getReg())      // BaseReg
+          .addImm(MI->getOperand(firstOpIndex + X86::AddrScaleAmt).getImm())     // Scale
+          .addReg(MI->getOperand(firstOpIndex + X86::AddrIndexReg).getReg())     // IndexReg
+          .addOperand(MCIL.LowerMachineOperand(MI, MODisp).getValue())           // Displacement
+          .addReg(MI->getOperand(firstOpIndex + X86::AddrSegmentReg).getReg())); // SegmentReg
+      }
+
+      // PINSR always takes 32-bit operand name except for PINSRQ.
+      EmitAndCountInstruction(MCInstBuilder(PINSR[offset])
+        .addReg(POISON_STORE[offset])
+        .addReg(POISON_STORE[offset])
+        .addReg(offset == 3 ? X86::R15 : X86::R15D)
+        .addImm(SimdIndex[offset]));
+
+      // Increment our save index and do a poison check now if we've filled up our poison register.
+      SimdIndex[offset] = (SimdIndex[offset] + 1) % (16 / readSize);
+      EmitPoisonAccumulate(offset);
+    } else if (MI->isTerminator() || MI->isCall()) {
+      // Well I guess we could jmp using a symbolic address - but ignore that
+      // for now.
+    } else {
+      // Weird... we have an operation that might read but we can't recognize it.
+      errs() << "Unrecognized operation that reads from memory\n";
+      MI->dump();
+      // Disabling the panic here because we don't handle implicit memory operands from idiv32 yet.
+      // llvm_unreachable("Unrecognized operation that reads from memory");
+    }
+  }
+
+  const MachineInstr &LastMI = MI->getParent()->instr_back();
+  if (MI->isTerminator() || MI->isCall() || MI == &LastMI) {
+    // If we are ending this basic block, force the accumulation of any poison
+    // that we may have collected.
+    for (unsigned int i = 0; i < sizeof(SimdIndex)/sizeof(SimdIndex[0]); i++) {
+      if (SimdIndex[i] != 0) {
+        SimdIndex[i] = 0;
+        EmitPoisonAccumulate(i);
+      }
+    }
+  }
+}
 
 #undef DEBUG_TYPE
 
-  // This is where the upstream LLVM code begins for EmitInstruction.
+// This is where the upstream LLVM code begins for EmitInstruction.
+void X86AsmPrinter::EmitInstructionCore(const MachineInstr *MI, X86MCInstLower &MCInstLowering) {
+  const X86RegisterInfo *RI = MF->getSubtarget<X86Subtarget>().getRegisterInfo();
 
   switch (MI->getOpcode()) {
   case TargetOpcode::DBG_VALUE:
