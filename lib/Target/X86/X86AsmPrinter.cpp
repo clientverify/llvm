@@ -59,26 +59,32 @@
 using namespace llvm;
 
 
-std::string TaserFunctionsFile;
+std::string TaseInstrumentedFile;
 static cl::opt<std::string, true>
-TaserFunctionsFlag("taser-out",
-  cl::desc("File holding names of TASER eligible functions"),
+TaseFunctionsFlag("tase-instrumented-functions",
+  cl::desc("File holding names of TASE eligible functions to be instrumented"),
   cl::value_desc("filename"),
-  cl::location(TaserFunctionsFile),
-  cl::Required,
+  cl::location(TaseInstrumentedFile),
+  cl::ValueRequired);
+std::string TaseModeledFile;
+static cl::opt<std::string, true>
+TaseFunctionsFlag("tase-modeled-functions",
+  cl::desc("File holding names of modelled functions that are interpreted"),
+  cl::value_desc("filename"),
+  cl::location(TaseModeledFile),
   cl::ValueRequired);
 
 //===----------------------------------------------------------------------===//
 // Primitive Helper Functions.
 //===----------------------------------------------------------------------===//
 
-void X86AsmPrinter::loadTaserFunctions() {
-  std::ifstream is(TaserFunctionsFile, std::ios::in);
+void X86AsmPrinter::loadTaseFunctions() {
+  std::ifstream is(TaseFunctionsFile, std::ios::in);
   std::string line;
   while (std::getline(is, line)) {
-    TaserFunctions.push_back(line);
+    TaseFunctions.push_back(line);
   }
-  std::sort(TaserFunctions.begin(), TaserFunctions.end());
+  std::sort(TaseFunctions.begin(), TaseFunctions.end());
 }
 
 unsigned int X86AsmPrinter::getPhysRegSize(unsigned int reg) const {
@@ -98,10 +104,10 @@ unsigned int X86AsmPrinter::getPhysRegSize(unsigned int reg) const {
 bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   Subtarget = &MF.getSubtarget<X86Subtarget>();
 
-#define DEBUG_TYPE "taser"
-  DEBUG(dbgs() << "TASER examining function " << MF.getFunction()->getName() << "\n");
+#define DEBUG_TYPE "tase"
+  DEBUG(dbgs() << "TASE examining function " << MF.getFunction()->getName() << "\n");
 
-  // Initialize state for TASER.
+  // Initialize state for TASE.
   SpringboardCounter = 0;
 
   // T-SGX: Initialize cache analysis module

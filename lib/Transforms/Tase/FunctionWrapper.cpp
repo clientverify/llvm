@@ -10,7 +10,7 @@
 
 using namespace llvm;
 
-#define DEBUG_TYPE "taser"
+#define DEBUG_TYPE "tase"
 
 // We tag functions with either 'instrumented' or 'scaffold' tags so that
 // the X86 assembly emission will appropriately batch instructions in said
@@ -35,24 +35,24 @@ using namespace llvm;
 // No manual cache-line TSGX-style alignment of arguments is made.
 
 // Declared in X86AsmPrinter.cpp
-extern std::string TaserFunctionsFile;
+extern std::string TaseFunctionsFile;
 
 namespace {
   struct FunctionWrapperPass : public FunctionPass {
     static char ID;
-    std::vector<std::string> TaserFunctions;
+    std::vector<std::string> TaseFunctions;
 
-    FunctionWrapperPass() : FunctionPass(ID), TaserFunctions() {}
+    FunctionWrapperPass() : FunctionPass(ID), TaseFunctions() {}
 
     // When the pass is complete, emit the name of every function eligible
-    // for TASER instrumentation to the provided output file.
+    // for Tase instrumentation to the provided output file.
     virtual bool doFinalization(Module& M) {
       std::error_code ec;
-      raw_fd_ostream out(TaserFunctionsFile, ec, sys::fs::F_Text);
+      raw_fd_ostream out(TaseFunctionsFile, ec, sys::fs::F_Text);
       if (ec) {
-        errs() << "Unable to open TASER function output file";
+        errs() << "Unable to open TASE function output file";
       } else {
-        for (auto const& name: TaserFunctions) {
+        for (auto const& name: TaseFunctions) {
           out << name << "\n";
         }
       }
@@ -63,22 +63,22 @@ namespace {
       DEBUG(dbgs() << "Function: " << F.getName() << " ... ");
       char* function_type;
 
-      // Hard-coded here for skipping taser_init function.
+      // Hard-coded here for skipping tase_init function.
       // TODO: Hardcode or establish a convention to detect scaffold functions.
       // TODO: Extract tags into a header to share it with the codegen stage.
-      // That would mean taser.fun.info, scaffold and instrumented would all
+      // That would mean tase.fun.info, scaffold and instrumented would all
       // be defines in a header once we figure out where they go.
-      if (F.empty() || F.getName().str() == "taser_init") {
+      if (F.empty() || F.getName().str() == "tase_init") {
         DEBUG(dbgs() << "scaffold function or trivial\n");
         function_type = "scaffold";
       }
       else {
         DEBUG(dbgs() << "target function\n");
         function_type = "instrumented";
-        TaserFunctions.push_back(F.getName().str());
+        TaseFunctions.push_back(F.getName().str());
       }
       MDNode *node = MDNode::get(ctx, MDString::get(ctx, function_type));
-      F.setMetadata("taser.fun.info", node);
+      F.setMetadata("tase.fun.info", node);
       // No really we modified some functions...  in a trivial way.
       // But let's obey the API.
       return true;
@@ -91,4 +91,4 @@ namespace {
 }
 
 char FunctionWrapperPass::ID = 0;
-static RegisterPass<FunctionWrapperPass> X("function-wrapper", "Tag functions for TASER TSX instrumentation");
+static RegisterPass<FunctionWrapperPass> X("function-wrapper", "Tag functions for TASE TSX instrumentation");

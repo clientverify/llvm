@@ -1058,7 +1058,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   X86MCInstLower MCInstLowering(*MF, *this);
   const Function *F = MF->getFunction();
   if (F->hasMetadata()) {
-    MDNode *node = F->getMetadata("taser.fun.info");
+    MDNode *node = F->getMetadata("tase.fun.info");
     if ((cast<MDString>(node->getOperand(0))->getString() == "instrumented")) {
       EmitPoisonCheck(MI, MCInstLowering, true);
       // Only instrument functions that are tagged to be instrumented.
@@ -1075,7 +1075,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 //===----------------------------------------------------------------------===//
 // Transaction Batching and Springboarding.
 //===----------------------------------------------------------------------===//
-#define DEBUG_TYPE "taser"
+#define DEBUG_TYPE "tase"
 
 // Clean this up at some point once we figure out how the loop splitting works.
 bool insert_jmp = false;
@@ -1325,7 +1325,7 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
       DEBUG(dbgs() << "Call to instrinsic: " << MO0.getMCSymbol()->getName() << "\n");
     } else {
       std::string callee_name = MCIL.GetSymbolFromOperand(MO0)->getName().str();
-      is_instrumented = std::binary_search(TaserFunctions.begin(), TaserFunctions.end(), callee_name);
+      is_instrumented = std::binary_search(TaseFunctions.begin(), TaseFunctions.end(), callee_name);
       DEBUG(dbgs() << "Call to function: " << callee_name << "\n");
     }
 

@@ -95,7 +95,7 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
    explicit X86AsmPrinter(TargetMachine &TM,
                           std::unique_ptr<MCStreamer> Streamer)
        : AsmPrinter(TM, std::move(Streamer)), SM(*this), FM(*this),
-         CA(), SMShadowTracker(TM), TaserFunctions() {
+         CA(), SMShadowTracker(TM), TaseFunctions() {
            // Clear poison checking indices before the first block.
            std::fill(std::begin(SimdIndex), std::end(SimdIndex), 0);
          }
@@ -135,7 +135,7 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   bool doInitialization(Module &M) override {
     SMShadowTracker.reset(0);
     SM.reset();
-    loadTaserFunctions();
+    loadTaseFunctions();
     return AsmPrinter::doInitialization(M);
   }
 
@@ -152,7 +152,7 @@ private:
   MCSymbol* getMBBLabel(const MachineBasicBlock* targetBasicBlock);
   void EmitSaveRax();
   void EmitRestoreRax();
-  void loadTaserFunctions();
+  void loadTaseFunctions();
   void EmitInstructionCore(const MachineInstr *MI, X86MCInstLower &MCInstLowering);
   // Returns whether core instruction processing should be run.
   bool EmitInstrumentedInstruction(const MachineInstr *MI, X86MCInstLower &MCIL);
@@ -178,7 +178,7 @@ private:
   unsigned int SpringboardCounter;
   // Convention - index i corresponds to poison storage for operand size 2^i.
   unsigned int SimdIndex[4];
-  std::vector<std::string> TaserFunctions;
+  std::vector<std::string> TaseFunctions;
 };
 
 } // end namespace llvm
