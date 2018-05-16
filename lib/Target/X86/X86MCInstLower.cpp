@@ -1163,6 +1163,11 @@ MCSymbol* X86AsmPrinter::getMBBLabel(const MachineBasicBlock* targetBasicBlock) 
   return OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + Twine(targetBasicBlock->getNumber()));
 }
 
+void X86AsmPrinter::EmitXabort(int8_t code) {
+  EmitAndCountInstruction(MCInstBuilder(X86::XABORT)
+    .addImm(code));
+}
+
 void X86AsmPrinter::EmitBasicBlockStart(const MachineBasicBlock &MBB) {
   AsmPrinter::EmitBasicBlockStart(MBB);
 
@@ -1304,6 +1309,7 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
     bool call_opt = way_usage <= 4;
     bool is_instrumented = false;
     bool save_rax_before = false;
+    int8_t modeled_index = -1; // Not modeled.
 
     // Check if it is a indirect call.
     const MachineOperand &MO0 = MI->getOperand(0);
@@ -1318,45 +1324,64 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
       // Local indirect jumps are always TSX instrumented.
       is_instrumented = true;
       DEBUG(dbgs() << "Call to indirect target based on: " << MO0.getReg() << "\n");
-    } else if (MO0.isMCSymbol()) {
-      // is_instrumented remains false - these are compiler intrinsics
-      // and until we figure out how to correctly handle them, we assume they
-      // run outside transactions on concrete values.
-      DEBUG(dbgs() << "Call to instrinsic: " << MO0.getMCSymbol()->getName() << "\n");
     } else {
-      std::string callee_name = MCIL.GetSymbolFromOperand(MO0)->getName().str();
-      is_instrumented = std::binary_search(TaseFunctions.begin(), TaseFunctions.end(), callee_name);
-      DEBUG(dbgs() << "Call to function: " << callee_name << "\n");
+      std::string callee_name;
+      if (MO0.isMCSymbol()) {
+        // is_instrumented remains false - these are compiler intrinsics
+        // and until we figure out how to correctly handle them, we assume they
+        // run outside transactions on concrete values.
+        DEBUG(dbgs() << "Call to instrinsic");
+        callee_name = MO0.getMCSymbol()->getName().str();
+      } else {
+        DEBUG(dbgs() << "Call to function");
+        callee_name = MCIL.GetSymbolFromOperand(MO0)->getName().str();
+      }
+      DEBUG(dbgs() << ": " << callee_name << "\n");
+
+      is_instrumented = std::binary_search(TaseInstrumentedFunctions.begin(), TaseInstrumentedFunctions.end(), callee_name);
+      if (std::binary_search(TaseModeledFunctions.begin(), TaseModeledFunctions.end(), callee_name)) {
+        modeled_index = std::lower_bound(TaseModeledFunctions.begin(), TaseModeledFunctions.end(), callee_name) - TaseModeledFunctions.begin();
+      }
     }
 
-    if (is_instrumented) {
-      DEBUG(dbgs() << "Known instrumented call target\n");
-      if (call_opt) {
-        DEBUG(dbgs() << "Optimizing away transaction\n");
-      } else {
+    if (is_instrumented || modeled_index >= 0) {
+      DEBUG(dbgs() << "Known instrumented or modeled call target\n");
+      if (!call_opt || modeled_index >= 0) {
         EmitTsxSpringCall("begin", save_rax_before);
+      } else {
+        DEBUG(dbgs() << "Optimizing away transaction\n");
       }
     } else {
       DEBUG(dbgs() << "Scaffolding/external call target\n");
       EmitTsxSpringClose();
     }
 
-    // For now, assume that anything we are compiling for instrumentation only
-    // calls other functions that either need instrumentation or are
-    // instrumentation aware (i.e. scaffolding functions).
-    // If there are special klee_ or uclibc functions that need to be special
-    // cased, that would happen here.
-    //
+
     // Ignore shadow map tracking - oh well :(
-    MCInst CallInst;
-    MCIL.Lower(MI, CallInst);
-    EmitAndCountInstruction(CallInst);
+    if (modeled_index >= 0) {
+      // Modeled functions follow a special call sequence.  Instead of actually performing the call,
+      // we instead perform an XABORT <function_index> instead.  Since we have a sorted, unique list
+      // of modeled functions, the KLEE interpreter can use the given index against the same list
+      // to recover the name of the modeled function.
+      //
+      // Limitation: can only model 255 functions but that is more than enough for us.  In fact,
+      // we shall only allow 128 functions (0-127) and reserve the rest from other debug and
+      // indicator values.  If more is needed, add a layer of indirection.  Make a global variable
+      // to hold the index of the modeled function and write the index to that location instead.
+      // You can xaborting with an indicator value for "modeled function abort" to cue the
+      // interpreter into responding correctly.
+      EmitXabort(modeled_index);
+    } else {
+      MCInst CallInst;
+      MCIL.Lower(MI, CallInst);
+      EmitAndCountInstruction(CallInst);
+    }
 
     // Check whether we need to save & restore rax after a call instruction.
     MachineBasicBlock::const_iterator MBBI(MI);
     bool save_rax_after = CA.isRAXSrcAfterCall(MBB->getNumber(), std::distance(MBB->begin(), MBBI));
-    if (is_instrumented) {
-      if (!call_opt) {
+    if (is_instrumented || modeled_index >= 0) {
+      if (!call_opt || modeled_index >= 0) {
         EmitTsxSpringCall("end", save_rax_after);
       }
     } else {

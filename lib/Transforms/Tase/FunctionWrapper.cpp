@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <fstream>
 #include <string>
 
 #include "llvm/Pass.h"
@@ -12,7 +14,7 @@ using namespace llvm;
 
 #define DEBUG_TYPE "tase"
 
-// We tag functions with either 'instrumented' or 'scaffold' tags so that
+// We tag functions with either 'instrumented','scaffold' or 'modeled' tags so that
 // the X86 assembly emission will appropriately batch instructions in said
 // functions.
 
@@ -27,6 +29,11 @@ using namespace llvm;
 // them appropriately.  They do not need to run in a transaction.  These are
 // called 'scaffold' functions.
 //
+// Modeled functions are functions which the KLEE interpretation environment
+// understands. These functions will never run inside a transaction and
+// its implementation here only exists to support running the function during
+// concrete execution.
+//
 // Currently, we are not worrying about system/libc functions here.  Those are
 // compiled and exported separately as part of klee-uclibc.  We will need to link
 // any target binary with a custom uclibc that has been sufficiently instrumented
@@ -35,27 +42,54 @@ using namespace llvm;
 // No manual cache-line TSGX-style alignment of arguments is made.
 
 // Declared in X86AsmPrinter.cpp
-extern std::string TaseFunctionsFile;
+extern std::string TaseInstrumentedFile;
+extern std::string TaseModeledFile;
 
 namespace {
   struct FunctionWrapperPass : public FunctionPass {
     static char ID;
-    std::vector<std::string> TaseFunctions;
+    std::vector<std::string> TaseInstrumentedFunctions;
+    std::vector<std::string> TaseModeledFunctions;
 
-    FunctionWrapperPass() : FunctionPass(ID), TaseFunctions() {}
+    FunctionWrapperPass() : FunctionPass(ID), TaseInstrumentedFunctions(), TaseModeledFunctions() {}
+
+    virtual bool doInitialization(Module& M) {
+      if (TaseModeledFile.empty()) {
+        errs() << "No list of modeled functions provided.  All functions will be marked for instrumentation.\n";
+        return false;
+      }
+      std::ifstream is(TaseModeledFile, std::ios::in);
+      if (!is.is_open()) {
+        errs() << "Unable to open TASE modeled functions file.\n";
+        return false;
+      }
+      std::string line;
+      while (std::getline(is, line)) {
+        TaseModeledFunctions.push_back(line);
+      }
+      std::sort(TaseModeledFunctions.begin(), TaseModeledFunctions.end());
+      return false;
+    }
 
     // When the pass is complete, emit the name of every function eligible
     // for Tase instrumentation to the provided output file.
     virtual bool doFinalization(Module& M) {
-      std::error_code ec;
-      raw_fd_ostream out(TaseFunctionsFile, ec, sys::fs::F_Text);
-      if (ec) {
-        errs() << "Unable to open TASE function output file";
-      } else {
-        for (auto const& name: TaseFunctions) {
-          out << name << "\n";
-        }
+      if (TaseInstrumentedFile.empty()) {
+        errs() << "No list of modeled functions provided.  A list of marked functions will not be generated.\n";
+        return false;
       }
+      std::error_code ec;
+      raw_fd_ostream out(TaseInstrumentedFile, ec, sys::fs::F_Text);
+      if (ec) {
+        errs() << "Unable to open TASE instrumented function output file.\n";
+        return false;
+      }
+
+      std::sort(TaseInstrumentedFunctions.begin(), TaseInstrumentedFunctions.end());
+      for (auto const& name: TaseInstrumentedFunctions) {
+        out << name << "\n";
+      }
+      return false;
     }
 
     virtual bool runOnFunction(Function& F) {
@@ -63,19 +97,23 @@ namespace {
       DEBUG(dbgs() << "Function: " << F.getName() << " ... ");
       char* function_type;
 
-      // Hard-coded here for skipping tase_init function.
-      // TODO: Hardcode or establish a convention to detect scaffold functions.
       // TODO: Extract tags into a header to share it with the codegen stage.
       // That would mean tase.fun.info, scaffold and instrumented would all
       // be defines in a header once we figure out where they go.
-      if (F.empty() || F.getName().str() == "tase_init") {
+      std::string function_name = F.getName().str();
+      bool is_modeled = std::binary_search(TaseModeledFunctions.begin(), TaseModeledFunctions.end(), function_name);
+      if (is_modeled) {
+        DEBUG(dbgs() << "function modeled in interpreter\n");
+        function_type = "modeled";
+      } else if (F.empty() || function_name == "springboard") {
+        // All TASE binaries will have a method named springboard that should never be instrumented.
         DEBUG(dbgs() << "scaffold function or trivial\n");
         function_type = "scaffold";
       }
       else {
         DEBUG(dbgs() << "target function\n");
         function_type = "instrumented";
-        TaseFunctions.push_back(F.getName().str());
+        TaseInstrumentedFunctions.push_back(function_name);
       }
       MDNode *node = MDNode::get(ctx, MDString::get(ctx, function_type));
       F.setMetadata("tase.fun.info", node);

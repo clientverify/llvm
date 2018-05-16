@@ -95,7 +95,7 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
    explicit X86AsmPrinter(TargetMachine &TM,
                           std::unique_ptr<MCStreamer> Streamer)
        : AsmPrinter(TM, std::move(Streamer)), SM(*this), FM(*this),
-         CA(), SMShadowTracker(TM), TaseFunctions() {
+         CA(), SMShadowTracker(TM), TaseInstrumentedFunctions(), TaseModeledFunctions() {
            // Clear poison checking indices before the first block.
            std::fill(std::begin(SimdIndex), std::end(SimdIndex), 0);
          }
@@ -135,7 +135,11 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   bool doInitialization(Module &M) override {
     SMShadowTracker.reset(0);
     SM.reset();
-    loadTaseFunctions();
+    loadTaseFunctions(TaseInstrumentedFile, TaseInstrumentedFunctions, "Cannot instrument CALL instructions without a list of instrumented functions");
+    loadTaseFunctions(TaseModeledFile, TaseModeledFunctions, "Cannot instrument CALL instructions without a list of modeled functions");
+    if (TaseModeledFunctions.size() > 128) {
+      report_fatal_error("Cannot handle more than 128 modeled functions");
+    }
     return AsmPrinter::doInitialization(M);
   }
 
@@ -152,7 +156,8 @@ private:
   MCSymbol* getMBBLabel(const MachineBasicBlock* targetBasicBlock);
   void EmitSaveRax();
   void EmitRestoreRax();
-  void loadTaseFunctions();
+  void EmitXabort(int8_t code);
+  void loadTaseFunctions(const std::string& path, std::vector<std::string>& store, const std::string& error_msg);
   void EmitInstructionCore(const MachineInstr *MI, X86MCInstLower &MCInstLowering);
   // Returns whether core instruction processing should be run.
   bool EmitInstrumentedInstruction(const MachineInstr *MI, X86MCInstLower &MCIL);
@@ -178,9 +183,13 @@ private:
   unsigned int SpringboardCounter;
   // Convention - index i corresponds to poison storage for operand size 2^i.
   unsigned int SimdIndex[4];
-  std::vector<std::string> TaseFunctions;
+  std::vector<std::string> TaseInstrumentedFunctions;
+  std::vector<std::string> TaseModeledFunctions;
 };
 
 } // end namespace llvm
+
+extern std::string TaseInstrumentedFile;
+extern std::string TaseModeledFile;
 
 #endif

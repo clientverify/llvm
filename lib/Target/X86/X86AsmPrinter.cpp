@@ -66,10 +66,11 @@ TaseFunctionsFlag("tase-instrumented-functions",
   cl::value_desc("filename"),
   cl::location(TaseInstrumentedFile),
   cl::ValueRequired);
+
 std::string TaseModeledFile;
 static cl::opt<std::string, true>
 TaseFunctionsFlag("tase-modeled-functions",
-  cl::desc("File holding names of modelled functions that are interpreted"),
+  cl::desc("File holding names of modeled functions that are interpreted"),
   cl::value_desc("filename"),
   cl::location(TaseModeledFile),
   cl::ValueRequired);
@@ -78,13 +79,25 @@ TaseFunctionsFlag("tase-modeled-functions",
 // Primitive Helper Functions.
 //===----------------------------------------------------------------------===//
 
-void X86AsmPrinter::loadTaseFunctions() {
-  std::ifstream is(TaseFunctionsFile, std::ios::in);
+void X86AsmPrinter::loadTaseFunctions(const std::string& path, std::vector<std::string>& store, const std::string& error_msg) {
+  if (path.empty()) {
+    report_fatal_error(error_msg);
+    return;
+  }
+  std::ifstream is(path, std::ios::in);
+  if (!is.is_open()) {
+    report_fatal_error("Unable to open TASE file at: " + path);
+    return;
+  }
   std::string line;
   while (std::getline(is, line)) {
-    TaseFunctions.push_back(line);
+    store.push_back(line);
   }
-  std::sort(TaseFunctions.begin(), TaseFunctions.end());
+
+  // We need a sorted file so that we can all agree on the "index"/position of various functions in the list.
+  if (std::adjacent_find(store.begin(), store.end(), std::greater_equal<std::string>()) == store.end()) {
+    report_fatal_error("TASE file is not sorted or contains duplicates: " + path);
+  }
 }
 
 unsigned int X86AsmPrinter::getPhysRegSize(unsigned int reg) const {
