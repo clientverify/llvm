@@ -22,6 +22,10 @@ namespace {
   class X86MCInstLower;
 }
 
+// Command line flags.
+extern std::string TaseInstrumentedFile;
+extern std::string TaseModeledFile;
+
 namespace llvm {
 class MCStreamer;
 class MCSymbol;
@@ -147,16 +151,15 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
 
 private:
   MCSymbol* EmitTsxSpringboard(const Twine& suffix, unsigned int opcode, const Twine& springName);
+  MCSymbol* EmitTsxSpringboardJmp(const Twine& suffix, const Twine& springName, bool saveAndRestoreRax = false, bool withCounter = true);
   // Springboard for loop/branch analysis
   MCSymbol* EmitTsxSpringLoop(const MachineBasicBlock* targetBasicBlock, const MachineInstr *MI, bool saveRax);
+  // Springboard for modeled call instructions.
+  std::string EmitTsxModeledCallStart(int modeledIndex);
   // Springboard before and after call instructions.
-  MCSymbol* EmitTsxSpringCall(const Twine& suffix, bool saveAndRestoreRax);
-  MCSymbol* EmitTsxSpringClose();
-  MCSymbol* EmitTsxSpringOpen(bool saveAndRestoreRax);
   MCSymbol* getMBBLabel(const MachineBasicBlock* targetBasicBlock);
   void EmitSaveRax();
   void EmitRestoreRax();
-  void EmitXabort(int8_t code);
   void loadTaseFunctions(const std::string& path, std::vector<std::string>& store, const std::string& error_msg);
   void EmitInstructionCore(const MachineInstr *MI, X86MCInstLower &MCInstLowering);
   // Returns whether core instruction processing should be run.
@@ -188,8 +191,5 @@ private:
 };
 
 } // end namespace llvm
-
-extern std::string TaseInstrumentedFile;
-extern std::string TaseModeledFile;
 
 #endif

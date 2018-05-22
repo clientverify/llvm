@@ -61,7 +61,7 @@ using namespace llvm;
 
 std::string TaseInstrumentedFile;
 static cl::opt<std::string, true>
-TaseFunctionsFlag("tase-instrumented-functions",
+TaseInstrumentedFlag("tase-instrumented-functions",
   cl::desc("File holding names of TASE eligible functions to be instrumented"),
   cl::value_desc("filename"),
   cl::location(TaseInstrumentedFile),
@@ -69,7 +69,7 @@ TaseFunctionsFlag("tase-instrumented-functions",
 
 std::string TaseModeledFile;
 static cl::opt<std::string, true>
-TaseFunctionsFlag("tase-modeled-functions",
+TaseModeledFlag("tase-modeled-functions",
   cl::desc("File holding names of modeled functions that are interpreted"),
   cl::value_desc("filename"),
   cl::location(TaseModeledFile),
@@ -95,7 +95,7 @@ void X86AsmPrinter::loadTaseFunctions(const std::string& path, std::vector<std::
   }
 
   // We need a sorted file so that we can all agree on the "index"/position of various functions in the list.
-  if (std::adjacent_find(store.begin(), store.end(), std::greater_equal<std::string>()) == store.end()) {
+  if (std::adjacent_find(store.begin(), store.end(), std::greater_equal<std::string>()) != store.end()) {
     report_fatal_error("TASE file is not sorted or contains duplicates: " + path);
   }
 }
