@@ -151,11 +151,9 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
 
 private:
   MCSymbol* EmitTsxSpringboard(const Twine& suffix, unsigned int opcode, const Twine& springName);
-  MCSymbol* EmitTsxSpringboardJmp(const Twine& suffix, const Twine& springName, bool saveAndRestoreRax = false, bool withCounter = true);
+  MCSymbol* EmitTsxSpringboardJmp(const Twine& suffix, const Twine& springName, bool saveAndRestoreRax = false);
   // Springboard for loop/branch analysis
   MCSymbol* EmitTsxSpringLoop(const MachineBasicBlock* targetBasicBlock, const MachineInstr *MI, bool saveRax);
-  // Springboard for modeled call instructions.
-  std::string EmitTsxModeledCallStart(int modeledIndex);
   // Springboard before and after call instructions.
   MCSymbol* getMBBLabel(const MachineBasicBlock* targetBasicBlock);
   void EmitSaveRax();

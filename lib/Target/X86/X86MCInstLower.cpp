@@ -1122,74 +1122,18 @@ MCSymbol* X86AsmPrinter::EmitTsxSpringLoop(const MachineBasicBlock* targetBasicB
   return EmitTsxSpringboard(Twine(targetBasicBlock->getNumber()), opcode, "sb.reopen");
 }
 
-MCSymbol* X86AsmPrinter::EmitTsxSpringboardJmp(const Twine& suffix, const Twine& springName, bool saveAndRestoreRax, bool withCounter) {
+MCSymbol* X86AsmPrinter::EmitTsxSpringboardJmp(const Twine& suffix, const Twine& springName, bool saveAndRestoreRax) {
   if (saveAndRestoreRax) {
     EmitSaveRax();
   }
 
-  MCSymbol* resume = withCounter ?
-    EmitTsxSpringboard(suffix + "." + Twine(++SpringboardCounter), X86::JMP_1, springName) :
-    EmitTsxSpringboard(suffix, X86::JMP_1, springName);
+  MCSymbol* resume = EmitTsxSpringboard(suffix + "." + Twine(++SpringboardCounter), X86::JMP_1, springName);
   OutStreamer->EmitLabel(resume);
 
   if (saveAndRestoreRax) {
     EmitRestoreRax();
   }
   return resume;
-}
-
-std::string X86AsmPrinter::EmitTsxModeledCallStart(int modeledIndex) {
-  // Modeled functions follow a special call sequence.  Before making the call, we allow a special
-  // modeled function entry point in the springboard a chance to transfer control to an interpreter.
-  // This springboard entry point will also close the currently open transaction for us.
-  // Since this is function call, rax is guaranteed to be dead here.  Hence we can freely use r14
-  // and rax to pass values to the springboard code.
-  // r15 will contain return from the springboard as usual and will execute the native version of
-  // the modeled function.
-  // r14 will contain the alternate return address - i.e. the address *after* the native function call.
-  // rax will hold the function_index that identifies the modeled function being called.
-  //
-  // e.g.
-  //   MOV $function_id -> RAX
-  //   MOV native_end -> R14
-  //   MOV native_start -> R15
-  //   JMP sb.modeled
-  // native_start:
-  //   CALL function
-  //   MOV native_end -> R15
-  //   <save rax if necessary>
-  //   JMP sb.starttran
-  // native_end:
-  //   <restore rax if necessary>
-  //
-  // The springboard may transfer control to the interpreter by performing:
-  //   End previous transaction.
-  //   MOV R14 -> R15
-  //   XABORT $1
-  // Since we have a sorted, unique list of modeled functions, the KLEE interpreter can use the
-  // given index against the same list to recover the name of the modeled function.
-  // The springboard/interpreter must arrange for the return value to be in r14 as the symbolic
-  // execution recovery/return point occurs after a transaction is expected to have begun in the
-  // native codepath.
-  assert(modeledIndex >= 0 && "Cannot emit a call to an unknown modeled function");
-
-  std::string symbolicResumeName = "modeled.nativeend." + std::to_string(++SpringboardCounter);
-  MCSymbol *symbolicResume = OutContext.getOrCreateSymbol(Twine(MF->getName()) + "." + symbolicResumeName);
-  EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
-    .addReg(X86::R14)
-    .addReg(X86::RIP)               // base
-    .addImm(0)                      // scale
-    .addReg(X86::NoRegister)        // index
-    .addExpr(MCSymbolRefExpr::create(symbolicResume, OutContext))     // disp
-    .addReg(X86::NoRegister));      // seg
-  // 32-bit should be just fine.  We're just using it to get the sign extend for free.
-  EmitAndCountInstruction(MCInstBuilder(X86::MOV64ri)
-    .addReg(X86::RAX)
-    .addImm(modeledIndex));
-
-  EmitTsxSpringboardJmp("modeled.nativestart", "sb.modeled");
-
-  return symbolicResumeName;
 }
 
 MCSymbol* X86AsmPrinter::getMBBLabel(const MachineBasicBlock* targetBasicBlock) {
@@ -1338,6 +1282,7 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
     bool is_instrumented = false;
     bool save_rax_before = false;
     int modeled_index = -1; // Not modeled.
+    MCSymbol *callee_sym = nullptr;
 
     // Check if it is a indirect call.
     const MachineOperand &MO0 = MI->getOperand(0);
@@ -1353,17 +1298,17 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
       is_instrumented = true;
       DEBUG(dbgs() << "Call to indirect target based on: " << MO0.getReg() << "\n");
     } else {
-      std::string callee_name;
       if (MO0.isMCSymbol()) {
         // is_instrumented remains false - these are compiler intrinsics
         // and until we figure out how to correctly handle them, we assume they
         // run outside transactions on concrete values.
         DEBUG(dbgs() << "Call to instrinsic");
-        callee_name = MO0.getMCSymbol()->getName().str();
+        callee_sym = MO0.getMCSymbol();
       } else {
         DEBUG(dbgs() << "Call to function");
-        callee_name = MCIL.GetSymbolFromOperand(MO0)->getName().str();
+        callee_sym = MCIL.GetSymbolFromOperand(MO0);
       }
+      std::string callee_name = callee_sym->getName().str();
       DEBUG(dbgs() << ": " << callee_name << "\n");
 
       is_instrumented = std::binary_search(TaseInstrumentedFunctions.begin(), TaseInstrumentedFunctions.end(), callee_name);
@@ -1372,11 +1317,7 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
       }
     }
 
-    std::string modeled_return_sym;
-    if (modeled_index >= 0) {
-      DEBUG(dbgs() << "Known modeled function\n");
-      modeled_return_sym = EmitTsxModeledCallStart(modeled_index);
-    } else if (is_instrumented) {
+    if (is_instrumented) {
       DEBUG(dbgs() << "Known instrumented call target\n");
       if (!call_opt) {
         EmitTsxSpringboardJmp("call.begin", "sb.reopen", save_rax_before);
@@ -1391,17 +1332,45 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
     }
 
 
-    // Ignore shadow map tracking - oh well :(
-    MCInst CallInst;
-    MCIL.Lower(MI, CallInst);
-    EmitAndCountInstruction(CallInst);
+    // There was a reason for getting the modeled function index - it was to optimize dispatch of modeled
+    // functions.  For now, we just use the RIP of the function to identify the call.  We can return
+    // to this when we need to optimize instruction -> IR lookup.
+    if (modeled_index >= 0) {
+      DEBUG(dbgs() << "Known modeled function\n");
+
+      // Just load the function symbol location in RAX and call our dispatch function
+      // with r15 pointed to the actual call instruction.  The interpreter can
+      // figure out what the emulated function is being called through RAX.
+      EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
+        .addReg(X86::RAX)
+        .addReg(X86::RIP)               // base
+        .addImm(0)                      // scale
+        .addReg(X86::NoRegister)        // index
+        .addExpr(MCSymbolRefExpr::create(callee_sym, OutContext))     // disp
+        .addReg(X86::NoRegister));      // seg
+
+      EmitAndCountInstruction(MCInstBuilder(X86::LEA64r)
+        .addReg(X86::R15)
+        .addReg(X86::RIP)               // base
+        .addImm(0)                      // scale
+        .addReg(X86::NoRegister)        // index
+        .addImm(0)                      // disp
+        .addReg(X86::NoRegister));      // seg
+
+      MCSymbol *modeled_sym = OutContext.getOrCreateSymbol("enter_modeled");
+      EmitAndCountInstruction(MCInstBuilder(X86::CALL64pcrel32)
+          .addExpr(MCSymbolRefExpr::create(modeled_sym, OutContext)));
+    } else {
+      // Ignore shadow map tracking - oh well :(
+      MCInst CallInst;
+      MCIL.Lower(MI, CallInst);
+      EmitAndCountInstruction(CallInst);
+    }
 
     // Check whether we need to save & restore rax after a call instruction.
     MachineBasicBlock::const_iterator MBBI(MI);
     bool save_rax_after = CA.isRAXSrcAfterCall(MBB->getNumber(), std::distance(MBB->begin(), MBBI));
-    if (modeled_index >= 0) {
-      EmitTsxSpringboardJmp(modeled_return_sym, "sb.entertran", save_rax_after, false);
-    } else if (is_instrumented) {
+    if (is_instrumented) {
       if (!call_opt) {
         EmitTsxSpringboardJmp("call.end", "sb.reopen", save_rax_after);
       }
