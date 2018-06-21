@@ -1119,7 +1119,7 @@ MCSymbol* X86AsmPrinter::EmitTsxSpringLoop(const MachineBasicBlock* targetBasicB
   }
 
   unsigned opcode = (MI == nullptr) ? unsigned(X86::JMP_1) : MI->getOpcode();
-  return EmitTsxSpringboard(Twine(targetBasicBlock->getNumber()), opcode, "sb.reopen");
+  return EmitTsxSpringboard(Twine(targetBasicBlock->getNumber()), opcode, "sb_reopen");
 }
 
 MCSymbol* X86AsmPrinter::EmitTsxSpringboardJmp(const Twine& suffix, const Twine& springName, bool saveAndRestoreRax) {
@@ -1320,7 +1320,7 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
     if (is_instrumented) {
       DEBUG(dbgs() << "Known instrumented call target\n");
       if (!call_opt) {
-        EmitTsxSpringboardJmp("call.begin", "sb.reopen", save_rax_before);
+        EmitTsxSpringboardJmp("call.begin", "sb_reopen", save_rax_before);
       } else {
         DEBUG(dbgs() << "Optimizing away transaction\n");
       }
@@ -1328,7 +1328,7 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
       DEBUG(dbgs() << "Scaffolding/external call target\n");
       // rax does not need to be saved.  A scaffold call will always return in rax - so rax should be dead.
       // Close previous transaction.
-      EmitTsxSpringboardJmp("scaffold.begin", "sb.exittran");
+      EmitTsxSpringboardJmp("scaffold.begin", "sb_exittran");
     }
 
 
@@ -1357,7 +1357,7 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
         .addImm(0)                      // disp
         .addReg(X86::NoRegister));      // seg
 
-      MCSymbol *modeled_sym = OutContext.getOrCreateSymbol("enter_modeled");
+      MCSymbol *modeled_sym = OutContext.getOrCreateSymbol("sb_enter_modeled");
       EmitAndCountInstruction(MCInstBuilder(X86::CALL64pcrel32)
           .addExpr(MCSymbolRefExpr::create(modeled_sym, OutContext)));
     } else {
@@ -1372,11 +1372,11 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
     bool save_rax_after = CA.isRAXSrcAfterCall(MBB->getNumber(), std::distance(MBB->begin(), MBBI));
     if (is_instrumented) {
       if (!call_opt) {
-        EmitTsxSpringboardJmp("call.end", "sb.reopen", save_rax_after);
+        EmitTsxSpringboardJmp("call.end", "sb_reopen", save_rax_after);
       }
     } else {
       // Open/Enter a transaction.
-      EmitTsxSpringboardJmp("scaffold.end", "sb.entertran", save_rax_after);
+      EmitTsxSpringboardJmp("scaffold.end", "sb_entertran", save_rax_after);
     }
 
     return false;
