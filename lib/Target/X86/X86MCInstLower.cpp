@@ -1328,7 +1328,7 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
       DEBUG(dbgs() << "Scaffolding/external call target\n");
       // rax does not need to be saved.  A scaffold call will always return in rax - so rax should be dead.
       // Close previous transaction.
-      EmitTsxSpringboardJmp("scaffold.begin", "sb_exittran");
+      EmitTsxSpringboardJmp("scaffold.begin", "sb_exittran_wrapped");
     }
 
 
