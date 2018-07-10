@@ -1452,10 +1452,13 @@ static const unsigned int R15_SIZED[] = {X86::R15B, X86::R15W, X86::R15D, X86::R
 static const unsigned int POISON_STORE[] = {X86::XMM3, X86::XMM4, X86::XMM5, X86::XMM6};
 static const unsigned int POISON_REFERENCE = X86::XMM7;
 static const unsigned int POISON_ACCUMULATOR = X86::XMM1;
-static const unsigned int FAST_OPS[] = {
+static const unsigned int FAST_LOAD_OPS[] = {
   X86::MOV64rm, X86::MOV32rm, X86::MOV16rm, X86::MOV8rm,
   X86::POP16r, X86::POP32r, X86::POP64r,
   X86::MOVZX16rm8, X86::MOVZX32rm8, X86::MOVZX32rm16};
+
+static const unsigned int FAST_STORE_OPS[] = {
+  X86::PUSH16r, X86::PUSH32r, X86::PUSH64r};
 
 void X86AsmPrinter::EmitPoisonAccumulate(unsigned int offset) {
   if (SimdIndex[offset] == 0) {
@@ -1475,19 +1478,102 @@ void X86AsmPrinter::EmitPoisonAccumulate(unsigned int offset) {
 void X86AsmPrinter::EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL, bool before) {
   unsigned int opc = MI->getOpcode();
 
+  
+
+  //Write-checking section:
+
+  //Idea here is to make sure we don't write a
+  //concrete poison value to memory, since interpreter
+  //wouldn't be able to tell the destination had been concretized.
+  
+  //ABH: Adding check for mayStore 07/07/2018
+  //Doing slow case after mem op happens.  Should be
+  //able to add a fast case w/o a mem load later.
+
+  //Todo: Also add check to see if MI can both load and store
+  //and if so, we get the right mem operands for each (maybe INC is an example?).
+  bool checkStores = true;  //Make me global someday
+  bool fastStorePath = std::find(std::begin(FAST_STORE_OPS), std::end(FAST_STORE_OPS), opc) != std::end(FAST_STORE_OPS);
+  if (MI->mayStore() && checkStores && !before) {
+    
+    errs() << "Found store inst: ";
+    MI->dump();
+    errs() << "\n";
+    unsigned int storeSize = 0;
+    unsigned int offset = 0;
+    
+    if (!MI->memoperands_empty()) {
+      storeSize = (*MI->memoperands_begin())->getSize();
+      offset = getOffsetForSize(storeSize);
+    }
+    
+    if (fastStorePath) {
+
+       // In case the write involved sign extension or one of the "h" registers,
+        // just move the written value into r15 temporarily.  Then we can only use
+        // the size of memory that was written to compute the taint size.
+        unsigned newReg = MI->getOperand(0).getReg();
+        unsigned newSize = getPhysRegSize(newReg);
+        unsigned newOffset = getOffsetForSize(newSize);
+
+        // If storeSize is unavailable due to implicit operands (push for example),
+        // assign it here.
+        if (!storeSize) {
+          storeSize = newSize;
+          offset = newOffset;
+        }
+
+        EmitAndCountInstruction(MCInstBuilder(MOVrr[newOffset])
+          .addReg(R15_SIZED[newOffset])
+          .addReg(newReg));
+
+    } else  {
+
+      errs() << "Trying to insert check for store \n";
+      int firstOpIndex = X86II::getMemoryOperandNo(MI->getDesc().TSFlags, 0);
+      firstOpIndex += X86II::getOperandBias(MI->getDesc());
+
+      // The displacement could be an immediate or a symbol expression.  So explicitly
+      // lower it using our MCIL.
+      const MachineOperand &MODisp = MI->getOperand(firstOpIndex + X86::AddrDisp);
+      EmitAndCountInstruction(MCInstBuilder(MOVrm[offset])
+			      .addReg(R15_SIZED[offset])
+			      .addReg(MI->getOperand(firstOpIndex + X86::AddrBaseReg).getReg())      // BaseReg
+			      .addImm(MI->getOperand(firstOpIndex + X86::AddrScaleAmt).getImm())     // Scale
+			      .addReg(MI->getOperand(firstOpIndex + X86::AddrIndexReg).getReg())     // IndexReg
+			      .addOperand(MCIL.LowerMachineOperand(MI, MODisp).getValue())           // Displacement
+			      .addReg(MI->getOperand(firstOpIndex + X86::AddrSegmentReg).getReg())); // SegmentReg
+      
+      // PINSR always takes 32-bit operand name except for PINSRQ.
+      EmitAndCountInstruction(MCInstBuilder(PINSR[offset])
+			      .addReg(POISON_STORE[offset])
+			      .addReg(POISON_STORE[offset])
+			      .addReg(offset == 3 ? X86::R15 : X86::R15D)
+			      .addImm(SimdIndex[offset]));
+
+      // Increment our save index and do a poison check now if we've filled up our poison register.
+      SimdIndex[offset] = (SimdIndex[offset] + 1) % (16 / storeSize);
+      EmitPoisonAccumulate(offset);
+      
+    }
+  } //End of Write-checking section -------------------------------------
+
+  //Read-checking section: ----------------------------------------------
+  
   // These are some special and common "fast-case" operations, where
   // we can grab the value read from memory after it's stored in a register
   // and store it for poison checking.  That's a LOT faster than paying
   // for an extra read from memory.
   // At some point we'll want to try and include more instructions for this
   // optimization.
-  bool fastPath = std::find(std::begin(FAST_OPS), std::end(FAST_OPS), opc) != std::end(FAST_OPS);
-
+  bool fastLoadPath = std::find(std::begin(FAST_LOAD_OPS), std::end(FAST_LOAD_OPS), opc) != std::end(FAST_LOAD_OPS);
+  
+  
   // Fast path instructions are checked after they are run. Hence delay any other
   // fall-through block termination poison accumulation logic until after the instruction.
   // Similarly, don't rexamine the instruction after it has been emitted if it is not a fast
   // path instruction.
-  if ((fastPath && before) || (!fastPath && !before)) {
+  if ((fastLoadPath && before) || (!fastLoadPath && !before)) {
     return;
   }
 
@@ -1501,8 +1587,8 @@ void X86AsmPrinter::EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL
       offset = getOffsetForSize(readSize);
     }
 
-    if (fastPath || readSize) {
-      if (fastPath) {
+    if (fastLoadPath || readSize) {
+      if (fastLoadPath) {
         // In case the read involved sign extension or one of the "h" registers,
         // just move the read value into r15 temporarily.  Then we can only use
         // the size of memory that was read to compute the taint size.
@@ -1560,6 +1646,9 @@ void X86AsmPrinter::EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL
     }
   }
 
+   
+
+  
   const MachineInstr &LastMI = MI->getParent()->instr_back();
   if (MI->isTerminator() || MI->isCall() || MI == &LastMI) {
     // If we are ending this basic block, force the accumulation of any poison
