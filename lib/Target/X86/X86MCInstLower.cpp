@@ -1060,12 +1060,24 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   if (F->hasMetadata()) {
     MDNode *node = F->getMetadata("tase.fun.info");
     if ((cast<MDString>(node->getOperand(0))->getString() == "instrumented")) {
-      EmitPoisonCheck(MI, MCInstLowering, true);
       // Only instrument functions that are tagged to be instrumented.
+      EmitPoisonInstrumentation(MI, MCInstLowering, true);
+      // TODO: THIS IS INCORRECT IN GENERAL!
+      // You cannot do fast-path poison checking for an instruction after
+      // you have already emitted instructions to close/restart our TSX transaction.
+      // The only reason this currently works is because our instruction batching
+      // logic is too naive to split long basic blocks and happens to mostly
+      // split on branch instructions/instructions that don't read from memory.
+      // THIS ASSUMPTION IS NOT ACCURATE!  The end or beginning of a basic block
+      // may very well be a memory-accessing instruction.
+      // A fix for this would involve restructuring transaction batching so
+      // that instead of directly emitting the instruction, it instead delegates
+      // that responsibility to a function that pre- and post-poison instruments
+      // said instruction.  Labels will need to be carefully handled here.
       if (EmitInstrumentedInstruction(MI, MCInstLowering)) {
         EmitInstructionCore(MI, MCInstLowering);
       }
-      EmitPoisonCheck(MI, MCInstLowering, false);
+      EmitPoisonInstrumentation(MI, MCInstLowering, false);
     }
   } else {
     EmitInstructionCore(MI, MCInstLowering);
@@ -1162,6 +1174,8 @@ void X86AsmPrinter::EmitBasicBlockStart(const MachineBasicBlock &MBB) {
   }
 }
 
+// TODO: Do we ever actually terminate a transaction if its cache way usage exceeds the batching limit?
+// It doesn't look like we ever break up non-control flow instructions in the middle of a basic block.
 bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCInstLower &MCIL) {
   const MachineBasicBlock *MBB = MI->getParent();
   MachineLoopInfo *MLI = AsmPrinter::LI;
@@ -1392,46 +1406,52 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
 
 /*
   Big picture here is that we add "safe" (doesn't change flags or the output of a program)
-  instrumentation whenever an X86_64 instruction directly or indirectly depends on a value from
+  instrumentation whenever an X86_64 instruction directly or indirectly accesses a value from
   memory.
 
-  The idea is that we add poison SIMD-based poison checking by storing the value from memory in
+  We perform SIMD-based poison checking by storing the value read from or written to memory in
   a SIMD register, and check it later before the current transaction is committed to
   make sure it isn't poison.
 
   We assume that registers r14 and r15 are reserved and unavailable to the binary we're instrumenting,
   as done in t-sgx.  We also assume that the SIMD registers are unavailable to the target program,
-  since we use them for poison checking.  We're also assuming that alignment is enforced, ex that
+  since we use them for poison checking.  We're also assuming that alignment is enforced, e.g. that
   quad word values are stored on 8 byte boundaries, longs are stored on 4 byte boundaries, etc;
   we'll need to thing about how to deal with this on packed structs where alignment may be off.
+  We further assume that any logical allocation of memory (say an array of bytes or the payload
+  of a packet or whatever) is performed at a 2 byte boundary at least.  The reason this is
+  required is that right now, we assume a two-byte poison value is used.  This 2 byte value
+  is stored repeatedly in XMM7.  We assume that any time a byte value in memory is accessed,
+  we can poison the other byte at the nearest 2 byte boundary as well.  The interpreter will
+  internally keep track of which of these bytes are actually symbolic and which ones are
+  concrete but are being poisoned due to this alignment restriction.
 
-  Right now, we assume a two-byte poison value is used, and stored repeatedly in XMM7.
   To avoid issues with checking the alignment of values that are read, we have separate SIMD
-  registers for each of the 4 possible data sizes in x86_64.  The result of the poison checks
+  registers for each of the 3 possible data sizes in x86_64.  The result of the poison checks
   are OR'd with XMM1, which serves as an indicator variable that contains at least one "1" value
   if any poison is encountered in a transaction.
 
-  Byte values that are read are stored in XMM3.  Word (2 byte) values are stored in XMM4,
-  long/double word (4 byte) values are stored in XMM5, and quad word (8 byte) values are
-  stored in XMM6.
+  Byte and word (2-byte) values that are read are stored in XMM4.
+  Long/double word (4 byte) values are stored in XMM5.
+  Quad word (8 byte) values are stored in XMM6.
 
-  I haven't chosen the SIMD registers off any particular convention, but if we change them
-  we'll need to update the springboard.s file as well.  In springboard.s, we have have an
-  extra check at the end of every transaction to make sure there's no poison in XMM3-XMM6.
+  The transaction verification code in our springboard assembly file will ensure that these
+  registers are zeroed at the end of any transaction.  We do not need to clear the registers
+  during a transaction because the presense of poison anywhere in a transaction automatically
+  invalidates the entire transaction.
 
-  Note that the checks we add depend on the ManchineInstr function "mayLoad()" that checks
-  to see if a given X86 function uses data from memory.  I believe this returns TRUE even
-  if a memory value is just implicitly used, but we'll need to double check that at some
-  point.
-
-  Further down, you'll notice there are two cases for instrumentation -- the fast case, and
-  the slow case.  Fast cases are used when we need to instrument an instruction that performs
-  a move from memory that we can use to recover the value read, ex MOVQ (%r11), %r12 in AT&T syntax.
+  There are two cases for instrumentation -- the fast case, and the slow case.
+  Fast cases are used when we need to instrument an instruction that loads or stores a value
+  from/to memory without altering it for the purposes of poison checking.  We have hence
+  bypass the need to re-read said value from memory, either before it has been read
+  or after it has been written,
+  e.g. MOVQ (%r11), %r12 in AT&T syntax.
   In that case, we can just move from r12 into a SIMD register for checking later.
 
-  However, if an instruction doesn't explicitly load a "clean copy" of the memory it operates on -- ex ADDQ $5, (%RAX) -- we need
-  to pay for a load from the address in %RAX to a SIMD register for poison checking before the memory
-  value is operated on.  This is the slow case.
+  However, if an instruction doesn't explicitly load a "clean copy" of the memory it operates on,
+  e.g. ADDQ $5, (%RAX)
+  we need to pay for a load from the address in %RAX to a SIMD register for poison checking
+  before the memory value is operated on.  This is the slow case.
 
   Finally, note that we record the number of values loaded into SIMD registers in SIMD_index_X  based on the size X
   of the value read from memory.  When we've filled up a 128-bit SIMD register, we need to check it for poison before
@@ -1439,31 +1459,33 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
   OR-ing the result into XMM1.
 */
 
-// IMPORTANT To-do -- Need to add extra check around CALL and RET boundaries to check the four SIMD registers for poison
-// and OR the results into XMM1.
-// To do:  Make sure adding instructions while also using instruction iterators doesn't mess anything up.
-// Also double check that this is OK with bundles!!!
-// Also check that instructions at end of BB get paired with their "check" instructions. Do this via bundles.
+// TODO: check that this is OK with bundles!
 
 static const unsigned int MOVrr[] = {X86::MOV8rr, X86::MOV16rr, X86::MOV32rr, X86::MOV64rr};
 static const unsigned int MOVrm[] = {X86::MOV8rm, X86::MOV16rm, X86::MOV32rm, X86::MOV64rm};
 static const unsigned int PINSR[] = {X86::PINSRBrr, X86::PINSRWrri, X86::PINSRDrr, X86::PINSRQrr};
 static const unsigned int R15_SIZED[] = {X86::R15B, X86::R15W, X86::R15D, X86::R15};
+// We will never use POISON_STORE[0].  It's just here to make the math easier.
 static const unsigned int POISON_STORE[] = {X86::XMM3, X86::XMM4, X86::XMM5, X86::XMM6};
 static const unsigned int POISON_REFERENCE = X86::XMM7;
 static const unsigned int POISON_ACCUMULATOR = X86::XMM1;
-static const unsigned int FAST_LOAD_OPS[] = {
-  X86::MOV64rm, X86::MOV32rm, X86::MOV16rm, X86::MOV8rm,
+static const unsigned int FAST_OPS[] = {
+  // Loads
+  X86::MOV64rm, X86::MOV32rm, X86::MOV16rm,
+  // X86::MOV8rm,
   X86::POP16r, X86::POP32r, X86::POP64r,
-  X86::MOVZX16rm8, X86::MOVZX32rm8, X86::MOVZX32rm16};
+  // X86::MOVZX16rm8, X86::MOVZX32rm8,
+  X86::MOVZX32rm16,
+  // Stores
+  X86::PUSH16r, X86::PUSH32r, X86::PUSH64r
+  };
 
-static const unsigned int FAST_STORE_OPS[] = {
-  X86::PUSH16r, X86::PUSH32r, X86::PUSH64r};
 
 void X86AsmPrinter::EmitPoisonAccumulate(unsigned int offset) {
   if (SimdIndex[offset] == 0) {
-    // Compare in 2 byte chunks except for byte values.
-    EmitAndCountInstruction(MCInstBuilder(offset ? X86::PCMPEQWrr : X86::PCMPEQBrr)
+    // Compare in 2 byte chunks always!  When reading byte values, we read surrounding
+    // byte as well.
+    EmitAndCountInstruction(MCInstBuilder(X86::PCMPEQWrr)
       .addReg(POISON_STORE[offset])
       .addReg(POISON_STORE[offset])
       .addReg(POISON_REFERENCE));
@@ -1474,186 +1496,195 @@ void X86AsmPrinter::EmitPoisonAccumulate(unsigned int offset) {
   }
 }
 
-// This function is run twice - once before and once after instruction emission.
-void X86AsmPrinter::EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL, bool before) {
-  unsigned int opc = MI->getOpcode();
+void X86AsmPrinter::EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL, bool isFastPath) {
+  assert((MI->mayLoad() || MI->mayStore()) &&
+        "Non memory instruction cannot be instrumented for poison accumulation");
 
-  
+  unsigned int regSize = 0;
+  unsigned int offset = 0;
 
-  //Write-checking section:
+  if (!MI->memoperands_empty()) {
+    regSize = (*MI->memoperands_begin())->getSize();
+    offset = getOffsetForSize(regSize);
+  }
 
-  //Idea here is to make sure we don't write a
-  //concrete poison value to memory, since interpreter
-  //wouldn't be able to tell the destination had been concretized.
-  
-  //ABH: Adding check for mayStore 07/07/2018
-  //Doing slow case after mem op happens.  Should be
-  //able to add a fast case w/o a mem load later.
-
-  //Todo: Also add check to see if MI can both load and store
-  //and if so, we get the right mem operands for each (maybe INC is an example?).
-  bool checkStores = true;  //Make me global someday
-  bool fastStorePath = std::find(std::begin(FAST_STORE_OPS), std::end(FAST_STORE_OPS), opc) != std::end(FAST_STORE_OPS);
-  if (MI->mayStore() && checkStores && !before) {
-    
-    errs() << "Found store inst: ";
+  if (!isFastPath && !regSize) {
+    // Weird... we have an operation that might read but we can't recognize it.
+    errs() << "Unrecognized operation that reads from memory:  ";
     MI->dump();
     errs() << "\n";
-    unsigned int storeSize = 0;
-    unsigned int offset = 0;
-    
-    if (!MI->memoperands_empty()) {
-      storeSize = (*MI->memoperands_begin())->getSize();
-      offset = getOffsetForSize(storeSize);
-    }
-    
-    if (fastStorePath) {
-
-       // In case the write involved sign extension or one of the "h" registers,
-        // just move the written value into r15 temporarily.  Then we can only use
-        // the size of memory that was written to compute the taint size.
-        unsigned newReg = MI->getOperand(0).getReg();
-        unsigned newSize = getPhysRegSize(newReg);
-        unsigned newOffset = getOffsetForSize(newSize);
-
-        // If storeSize is unavailable due to implicit operands (push for example),
-        // assign it here.
-        if (!storeSize) {
-          storeSize = newSize;
-          offset = newOffset;
-        }
-
-        EmitAndCountInstruction(MCInstBuilder(MOVrr[newOffset])
-          .addReg(R15_SIZED[newOffset])
-          .addReg(newReg));
-
-    } else  {
-
-      errs() << "Trying to insert check for store \n";
-      int firstOpIndex = X86II::getMemoryOperandNo(MI->getDesc().TSFlags, 0);
-      firstOpIndex += X86II::getOperandBias(MI->getDesc());
-
-      // The displacement could be an immediate or a symbol expression.  So explicitly
-      // lower it using our MCIL.
-      const MachineOperand &MODisp = MI->getOperand(firstOpIndex + X86::AddrDisp);
-      EmitAndCountInstruction(MCInstBuilder(MOVrm[offset])
-			      .addReg(R15_SIZED[offset])
-			      .addReg(MI->getOperand(firstOpIndex + X86::AddrBaseReg).getReg())      // BaseReg
-			      .addImm(MI->getOperand(firstOpIndex + X86::AddrScaleAmt).getImm())     // Scale
-			      .addReg(MI->getOperand(firstOpIndex + X86::AddrIndexReg).getReg())     // IndexReg
-			      .addOperand(MCIL.LowerMachineOperand(MI, MODisp).getValue())           // Displacement
-			      .addReg(MI->getOperand(firstOpIndex + X86::AddrSegmentReg).getReg())); // SegmentReg
-      
-      // PINSR always takes 32-bit operand name except for PINSRQ.
-      EmitAndCountInstruction(MCInstBuilder(PINSR[offset])
-			      .addReg(POISON_STORE[offset])
-			      .addReg(POISON_STORE[offset])
-			      .addReg(offset == 3 ? X86::R15 : X86::R15D)
-			      .addImm(SimdIndex[offset]));
-
-      // Increment our save index and do a poison check now if we've filled up our poison register.
-      SimdIndex[offset] = (SimdIndex[offset] + 1) % (16 / storeSize);
-      EmitPoisonAccumulate(offset);
-      
-    }
-  } //End of Write-checking section -------------------------------------
-
-  //Read-checking section: ----------------------------------------------
-  
-  // These are some special and common "fast-case" operations, where
-  // we can grab the value read from memory after it's stored in a register
-  // and store it for poison checking.  That's a LOT faster than paying
-  // for an extra read from memory.
-  // At some point we'll want to try and include more instructions for this
-  // optimization.
-  bool fastLoadPath = std::find(std::begin(FAST_LOAD_OPS), std::end(FAST_LOAD_OPS), opc) != std::end(FAST_LOAD_OPS);
-  
-  
-  // Fast path instructions are checked after they are run. Hence delay any other
-  // fall-through block termination poison accumulation logic until after the instruction.
-  // Similarly, don't rexamine the instruction after it has been emitted if it is not a fast
-  // path instruction.
-  if ((fastLoadPath && before) || (!fastLoadPath && !before)) {
+    // Disabling the panic here because we don't handle implicit memory operands from idiv32 yet.
+    // llvm_unreachable("Unrecognized operation that reads from memory");
     return;
   }
 
-  // If the instruction can load from memory, check the value.
-  if (MI->mayLoad()) {
-    unsigned int readSize = 0;
-    unsigned int offset = 0;
+  if (isFastPath) {
+    // In case the read involved sign extension or one of the "h" registers,
+    // just move the value into r15 temporarily.  Then we can only use
+    // the size of memory that was read from/written to to compute the taint size.
+    unsigned newReg = MI->getOperand(0).getReg();
+    unsigned newSize = getPhysRegSize(newReg);
+    unsigned newOffset = getOffsetForSize(newSize);
 
-    if (!MI->memoperands_empty()) {
-      readSize = (*MI->memoperands_begin())->getSize();
-      offset = getOffsetForSize(readSize);
+    // If regSize is unavailable due to implicit operands (pop for example),
+    // assign it here.
+    if (!regSize) {
+      regSize = newSize;
+      offset = newOffset;
     }
 
-    if (fastLoadPath || readSize) {
-      if (fastLoadPath) {
-        // In case the read involved sign extension or one of the "h" registers,
-        // just move the read value into r15 temporarily.  Then we can only use
-        // the size of memory that was read to compute the taint size.
-        unsigned newReg = MI->getOperand(0).getReg();
-        unsigned newSize = getPhysRegSize(newReg);
-        unsigned newOffset = getOffsetForSize(newSize);
+    assert( regSize > 1 &&
+            "We should not be in the fast path unless we have at-least 2 bytes");
+    EmitAndCountInstruction(MCInstBuilder(MOVrr[newOffset])
+      .addReg(R15_SIZED[newOffset])
+      .addReg(newReg));
+  } else {
+    // Slow case
+    // The second parameter (opcode) is unused on x86.
+    int firstOpIndex = X86II::getMemoryOperandNo(MI->getDesc().TSFlags, 0);
+    firstOpIndex += X86II::getOperandBias(MI->getDesc());
 
-        // If readSize is unavailable due to implicit operands (pop for example),
-        // assign it here.
-        if (!readSize) {
-          readSize = newSize;
-          offset = newOffset;
-        }
+    // The displacement could be an immediate or a symbol expression.  So explicitly
+    // lower it using our MCIL.
+    const MachineOperand &MODisp = MI->getOperand(firstOpIndex + X86::AddrDisp);
+    // For a byte value access, perform an aligned 2 byte read instead by using a
+    // lea (address expression), r15
+    // and then carefuly mask out the bottom bit of the address without affecting
+    // any flags.  The address is calculated identically in both cases before masking
+    // is applied.
+    const unsigned int firstOpcode = (regSize == 1) ? static_cast<unsigned int>(X86::LEA64r) : MOVrm[offset];
+    const unsigned int destReg = (regSize == 1) ? static_cast<unsigned int>(X86::R15) : R15_SIZED[offset];
 
-        EmitAndCountInstruction(MCInstBuilder(MOVrr[newOffset])
-          .addReg(R15_SIZED[newOffset])
-          .addReg(newReg));
-      } else {
-        // Slow case
-        // The second parameter (opcode) is unused on x86.
-        int firstOpIndex = X86II::getMemoryOperandNo(MI->getDesc().TSFlags, 0);
-        firstOpIndex += X86II::getOperandBias(MI->getDesc());
+    EmitAndCountInstruction(MCInstBuilder(firstOpcode)
+      .addReg(destReg)
+      .addReg(MI->getOperand(firstOpIndex + X86::AddrBaseReg).getReg())      // BaseReg
+      .addImm(MI->getOperand(firstOpIndex + X86::AddrScaleAmt).getImm())     // Scale
+      .addReg(MI->getOperand(firstOpIndex + X86::AddrIndexReg).getReg())     // IndexReg
+      .addOperand(MCIL.LowerMachineOperand(MI, MODisp).getValue())           // Displacement
+      .addReg(MI->getOperand(firstOpIndex + X86::AddrSegmentReg).getReg())); // SegmentReg
 
-        // The displacement could be an immediate or a symbol expression.  So explicitly
-        // lower it using our MCIL.
-        const MachineOperand &MODisp = MI->getOperand(firstOpIndex + X86::AddrDisp);
-        EmitAndCountInstruction(MCInstBuilder(MOVrm[offset])
-          .addReg(R15_SIZED[offset])
-          .addReg(MI->getOperand(firstOpIndex + X86::AddrBaseReg).getReg())      // BaseReg
-          .addImm(MI->getOperand(firstOpIndex + X86::AddrScaleAmt).getImm())     // Scale
-          .addReg(MI->getOperand(firstOpIndex + X86::AddrIndexReg).getReg())     // IndexReg
-          .addOperand(MCIL.LowerMachineOperand(MI, MODisp).getValue())           // Displacement
-          .addReg(MI->getOperand(firstOpIndex + X86::AddrSegmentReg).getReg())); // SegmentReg
-      }
+    if (regSize == 1) {
+      // Shift the address right by one, then left by one to clear the bottom bit without
+      // setting any EFLAGS.  This uses BMI2 instructions and uses r14 (which is otherwise
+      // used to save rax across transaction boundaries).  We can assume that r14 is available
+      // to us because we are not in the fast path (and hence running before the instruction
+      // is emitted) and transaction batching is performed after this step.
+      //
+      // I believe we can also get this flag preserving
+      // behavior in two other ways:
+      // a) Manually saving the flags to memory and using andq (which is super slow)
+      // b) Using pinsr and pandn to load the address in xmm3 and then mask out
+      // the address using SIMD instructions (slightly faster).
+      // TODO: Optimization opportunity: If we run our backwards liveness analysis and
+      // conclude the EFLAGS is not live, we can use and -2, r15 directly.
+      // TODO: Optimization opportunity: If we are using a fixed displacement with no offset
+      // or can verify that the offset has no base register and scale is > 2, then we can
+      // completely bypass this and statically emit a 2-byte aligned address.
+      EmitAndCountInstruction(MCInstBuilder(X86::MOV32ri)
+          .addReg(X86::R14D)
+          .addImm(1));
+      EmitAndCountInstruction(MCInstBuilder(X86::SHRX64rr)
+          .addReg(X86::R15)
+          .addReg(X86::R15)
+          .addReg(X86::R14));
+      EmitAndCountInstruction(MCInstBuilder(X86::SHLX64rr)
+          .addReg(X86::R15)
+          .addReg(X86::R15)
+          .addReg(X86::R14));
+      // Dereference the aligned address and reset regSize so that it gets handles as a
+      // 2 byte read down below.
+      EmitAndCountInstruction(MCInstBuilder(X86::MOV16rm)
+          .addReg(X86::R15W)
+          .addReg(X86::R15)          // BaseReg
+          .addImm(0)                 // Scale
+          .addReg(X86::NoRegister)   // IndexReg
+          .addImm(0)                 // Displacement
+          .addReg(X86::NoRegister)); // SegmentReg
 
-      // PINSR always takes 32-bit operand name except for PINSRQ.
-      EmitAndCountInstruction(MCInstBuilder(PINSR[offset])
-        .addReg(POISON_STORE[offset])
-        .addReg(POISON_STORE[offset])
-        .addReg(offset == 3 ? X86::R15 : X86::R15D)
-        .addImm(SimdIndex[offset]));
-
-      // Increment our save index and do a poison check now if we've filled up our poison register.
-      SimdIndex[offset] = (SimdIndex[offset] + 1) % (16 / readSize);
-      EmitPoisonAccumulate(offset);
-    } else if (MI->isTerminator() || MI->isCall()) {
-      // Well I guess we could jmp using a symbolic address - but ignore that
-      // for now.
-    } else {
-      // Weird... we have an operation that might read but we can't recognize it.
-      errs() << "Unrecognized operation that reads from memory\n";
-      MI->dump();
-      // Disabling the panic here because we don't handle implicit memory operands from idiv32 yet.
-      // llvm_unreachable("Unrecognized operation that reads from memory");
+      regSize = 2;
     }
   }
 
-   
+  // PINSR always takes 32-bit operand name except for PINSRQ.
+  EmitAndCountInstruction(MCInstBuilder(PINSR[offset])
+    .addReg(POISON_STORE[offset])
+    .addReg(POISON_STORE[offset])
+    .addReg(offset == 3 ? X86::R15 : X86::R15D)
+    .addImm(SimdIndex[offset]));
 
-  
+  // Increment our save index and do a poison check now if we've filled up our poison register.
+  SimdIndex[offset] = (SimdIndex[offset] + 1) % (16 / regSize);
+  EmitPoisonAccumulate(offset);
+}
+
+
+// This function is run twice - once before and once after instruction emission.
+void X86AsmPrinter::EmitPoisonInstrumentation(const MachineInstr *MI, X86MCInstLower &MCIL, bool before) {
+  // We check both reads and writes for taint.
+  // Idea here is to make sure we don't write a
+  // concrete poison value to memory, since interpreter
+  // wouldn't be able to tell if the destination had been
+  // concretized.
+
+  // TODO: Also add check to see if MI can both load and store
+  // and if so, we get the right mem operands for each (maybe INC is an example?).
+
+  // These are some special and common "fast-case" operations, where
+  // we can grab the value read from memory after it's stored in a register
+  // or grab a value register value being written to memory after it executes
+  // and store it for poison checking.  That's a LOT faster than paying for
+  // an extra read from memory.  At some point we'll want to try and include
+  // more instructions for this optimization.
+  bool isFastPath = std::find(std::begin(FAST_OPS), std::end(FAST_OPS), MI->getOpcode()) != std::end(FAST_OPS);
+  // Fast path instructions are checked after they are run. Hence delay any other
+  // fall-through block termination poison accumulation logic until after the instruction.
+  // Normal load checking occurs before the instruction executes.  Normal store check
+  // occurs after the instruction executes.  Don't re-examine the instruction otherwise.
+  // Never process instructions that neither loads nor stores unless its a control flow
+  // instruction.
+  bool needsCheck = false;
+
+  if (isFastPath) {
+    needsCheck = !before;
+  } else if (MI->isTerminator() || MI->isCall()) {
+    // Well I guess we could jmp using a symbolic address - but ignore that
+    // for now.
+  } else if (before) {
+    if (MI->mayLoad() && MI->mayStore()) {
+      errs() << "Instruction both loads and stores.  Check output:";
+      MI->dump();
+      errs() << "\n";
+    }
+    needsCheck = MI->mayLoad();
+  } else {
+    needsCheck = MI->mayStore();
+  }
+
+  if (needsCheck) {
+    errs() << "Inserting poison check " << (before ? "before :" : "after :");
+    MI->dump();
+    errs() << "\n";
+    EmitPoisonCheck(MI, MCIL, isFastPath);
+  }
+
+
+  bool needsAccumulate = false;
   const MachineInstr &LastMI = MI->getParent()->instr_back();
-  if (MI->isTerminator() || MI->isCall() || MI == &LastMI) {
-    // If we are ending this basic block, force the accumulation of any poison
-    // that we may have collected.
+  if (MI->isTerminator() || MI->isCall()) {
+    // All instructions that alter control flow must check for poison
+    // and clear the accumulator registers before the instruction is executed.
+    needsAccumulate = before;
+  } else if (MI == &LastMI) {
+    // For a non-branching instruction at the end of a block (i.e. a
+    // fallthrough basic block), accumulate after the instruction in case
+    // we checked for poison after it.
+    needsAccumulate = !before;
+  }
+
+  if (needsAccumulate) {
     for (unsigned int i = 0; i < sizeof(SimdIndex)/sizeof(SimdIndex[0]); i++) {
+      // If the index is 0, then the accumulator has either not been used in
+      // this basic block or it has already been verified as part of a poison check.
       if (SimdIndex[i] != 0) {
         SimdIndex[i] = 0;
         EmitPoisonAccumulate(i);

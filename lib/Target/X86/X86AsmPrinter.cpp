@@ -95,8 +95,9 @@ void X86AsmPrinter::loadTaseFunctions(const std::string& path, std::vector<std::
   }
 
   // We need a sorted file so that we can all agree on the "index"/position of various functions in the list.
-  if (std::adjacent_find(store.begin(), store.end(), std::greater_equal<std::string>()) != store.end()) {
-    report_fatal_error("TASE file is not sorted or contains duplicates: " + path);
+  auto it_stop = std::adjacent_find(store.begin(), store.end(), std::greater_equal<std::string>());
+  if (it_stop != store.end()) {
+    report_fatal_error("TASE file is not sorted or contains duplicates: " + path + " -> " + (*it_stop));
   }
 }
 

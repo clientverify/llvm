@@ -163,7 +163,8 @@ private:
   // Returns whether core instruction processing should be run.
   bool EmitInstrumentedInstruction(const MachineInstr *MI, X86MCInstLower &MCIL);
   void EmitPoisonAccumulate(unsigned int offset);
-  void EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL, bool before);
+  void EmitPoisonInstrumentation(const MachineInstr *MI, X86MCInstLower &MCIL, bool before);
+  void EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL, bool isFastPath);
 
   unsigned int getPhysRegSize(unsigned int reg) const;
   bool usesRax(unsigned int reg) const {
@@ -172,7 +173,9 @@ private:
 
   unsigned int getOffsetForSize(unsigned int size) const {
     switch (size) {
-      case 1: return 0;
+      // Due to the size of our poison value, we need to read/write 2-bytes
+      // any time we test a single byte value.
+      case 1: return 1;
       case 2: return 1;
       case 4: return 2;
       case 8: return 3;
