@@ -1345,7 +1345,6 @@ bool X86AsmPrinter::EmitInstrumentedInstruction(const MachineInstr *MI, X86MCIns
       EmitTsxSpringboardJmp("scaffold.begin", "sb_exittran_wrapped");
     }
 
-
     // There was a reason for getting the modeled function index - it was to optimize dispatch of modeled
     // functions.  For now, we just use the RIP of the function to identify the call.  We can return
     // to this when we need to optimize instruction -> IR lookup.
@@ -1506,13 +1505,17 @@ void X86AsmPrinter::EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL
   if (!MI->memoperands_empty()) {
     regSize = (*MI->memoperands_begin())->getSize();
     offset = getOffsetForSize(regSize);
+    if (!regSize) {
+      errs() << "TASE: Instruction has zero-size memory operand:  " << *MI;
+      errs() << "  -> operand is:  " << *(*MI->memoperands_begin());
+    }
+  } else {
+    errs() << "TASE: Instruction has no memory operands:  " << *MI;
   }
 
   if (!isFastPath && !regSize) {
     // Weird... we have an operation that might read but we can't recognize it.
-    errs() << "Unrecognized operation that reads from memory:  ";
-    MI->dump();
-    errs() << "\n";
+    errs() << "TASE: Unrecognized operation that reads from memory:  " << *MI;
     // Disabling the panic here because we don't handle implicit memory operands from idiv32 yet.
     // llvm_unreachable("Unrecognized operation that reads from memory");
     return;
@@ -1533,12 +1536,13 @@ void X86AsmPrinter::EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL
       offset = newOffset;
     }
 
-    assert( regSize > 1 &&
-            "We should not be in the fast path unless we have at-least 2 bytes");
+    assert(regSize > 0 && "TASE: We should have some size information to poison check an instruction");
+    assert(regSize > 1 && "TASE: We should not be in the fast path unless we have at-least 2 bytes");
     EmitAndCountInstruction(MCInstBuilder(MOVrr[newOffset])
       .addReg(R15_SIZED[newOffset])
       .addReg(newReg));
   } else {
+    assert(regSize > 0 && "TASE: We should have some size information to poison check an instruction");
     // Slow case
     // The second parameter (opcode) is unused on x86.
     int firstOpIndex = X86II::getMemoryOperandNo(MI->getDesc().TSFlags, 0);
@@ -1605,6 +1609,8 @@ void X86AsmPrinter::EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL
     }
   }
 
+  // TODO: Use OutStreamer->AddComment to annotate cache way usage to help debuging this.
+
   // PINSR always takes 32-bit operand name except for PINSRQ.
   EmitAndCountInstruction(MCInstBuilder(PINSR[offset])
     .addReg(POISON_STORE[offset])
@@ -1626,9 +1632,6 @@ void X86AsmPrinter::EmitPoisonInstrumentation(const MachineInstr *MI, X86MCInstL
   // wouldn't be able to tell if the destination had been
   // concretized.
 
-  // TODO: Also add check to see if MI can both load and store
-  // and if so, we get the right mem operands for each (maybe INC is an example?).
-
   // These are some special and common "fast-case" operations, where
   // we can grab the value read from memory after it's stored in a register
   // or grab a value register value being written to memory after it executes
@@ -1644,6 +1647,7 @@ void X86AsmPrinter::EmitPoisonInstrumentation(const MachineInstr *MI, X86MCInstL
   // instruction.
   bool needsCheck = false;
 
+  // TODO: More special instructions - like idiv or (rep) movs
   if (isFastPath) {
     needsCheck = !before;
   } else if (MI->isTerminator() || MI->isCall()) {
@@ -1651,9 +1655,8 @@ void X86AsmPrinter::EmitPoisonInstrumentation(const MachineInstr *MI, X86MCInstL
     // for now.
   } else if (before) {
     if (MI->mayLoad() && MI->mayStore()) {
-      errs() << "Instruction both loads and stores.  Check output:";
-      MI->dump();
-      errs() << "\n";
+      DEBUG(dbgs() << "TASE: Instruction both loads and stores.  Check output:");
+      DEBUG(MI->dump());
     }
     needsCheck = MI->mayLoad();
   } else {
@@ -1661,12 +1664,10 @@ void X86AsmPrinter::EmitPoisonInstrumentation(const MachineInstr *MI, X86MCInstL
   }
 
   if (needsCheck) {
-    errs() << "Inserting poison check " << (before ? "before :" : "after :");
-    MI->dump();
-    errs() << "\n";
+    DEBUG(dbgs() << "TASE: Inserting poison check " << (before ? "before :" : "after :"));
+    DEBUG(MI->dump());
     EmitPoisonCheck(MI, MCIL, isFastPath);
   }
-
 
   bool needsAccumulate = false;
   const MachineInstr &LastMI = MI->getParent()->instr_back();
