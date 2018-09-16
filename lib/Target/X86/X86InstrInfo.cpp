@@ -91,6 +91,10 @@ enum {
   TB_ALIGN_MASK  = 0xff << TB_ALIGN_SHIFT
 };
 
+// Instruct that we want to actually enable forwarding and
+// force 16-bit alignment.
+const uint16_t TB_MUST_FORWARD = TB_NO_FORWARD | TB_ALIGN_16;
+
 struct X86MemoryFoldTableEntry {
   uint16_t RegOp;
   uint16_t MemOp;
@@ -273,9 +277,13 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     AddTableEntry(RegOp2MemOpTable2Addr, MemOp2RegOpTable,
                   Entry.RegOp, Entry.MemOp,
                   // Index 0, folded load and store, no alignment requirement.
-                  Entry.Flags | TB_INDEX_0 | TB_FOLDED_LOAD | TB_FOLDED_STORE);
+                  // We explicitly disable any register coalescing allowed here to ensure
+                  // RISC style instruction emission.
+                  Entry.Flags | TB_INDEX_0 | TB_FOLDED_LOAD | TB_FOLDED_STORE | TB_NO_FORWARD);
   }
 
+  // We mark the entries we want to preserve with MUST_FORWARD so that it can be flipped later
+  // since we want to disable mem-folding for pretty much everything.
   static const X86MemoryFoldTableEntry MemoryFoldTable0[] = {
     { X86::BT16ri8,     X86::BT16mi8,       TB_FOLDED_LOAD },
     { X86::BT32ri8,     X86::BT32mi8,       TB_FOLDED_LOAD },
@@ -308,24 +316,24 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::IMUL8r,      X86::IMUL8m,        TB_FOLDED_LOAD },
     { X86::JMP32r,      X86::JMP32m,        TB_FOLDED_LOAD },
     { X86::JMP64r,      X86::JMP64m,        TB_FOLDED_LOAD },
-    { X86::MOV16ri,     X86::MOV16mi,       TB_FOLDED_STORE },
-    { X86::MOV16rr,     X86::MOV16mr,       TB_FOLDED_STORE },
-    { X86::MOV32ri,     X86::MOV32mi,       TB_FOLDED_STORE },
-    { X86::MOV32rr,     X86::MOV32mr,       TB_FOLDED_STORE },
-    { X86::MOV64ri32,   X86::MOV64mi32,     TB_FOLDED_STORE },
-    { X86::MOV64rr,     X86::MOV64mr,       TB_FOLDED_STORE },
+    { X86::MOV16ri,     X86::MOV16mi,       TB_FOLDED_STORE | TB_MUST_FORWARD },
+    { X86::MOV16rr,     X86::MOV16mr,       TB_FOLDED_STORE | TB_MUST_FORWARD },
+    { X86::MOV32ri,     X86::MOV32mi,       TB_FOLDED_STORE | TB_MUST_FORWARD },
+    { X86::MOV32rr,     X86::MOV32mr,       TB_FOLDED_STORE | TB_MUST_FORWARD },
+    { X86::MOV64ri32,   X86::MOV64mi32,     TB_FOLDED_STORE | TB_MUST_FORWARD },
+    { X86::MOV64rr,     X86::MOV64mr,       TB_FOLDED_STORE | TB_MUST_FORWARD },
     { X86::MOV8ri,      X86::MOV8mi,        TB_FOLDED_STORE },
     { X86::MOV8rr,      X86::MOV8mr,        TB_FOLDED_STORE },
     { X86::MOV8rr_NOREX, X86::MOV8mr_NOREX, TB_FOLDED_STORE },
-    { X86::MOVAPDrr,    X86::MOVAPDmr,      TB_FOLDED_STORE | TB_ALIGN_16 },
-    { X86::MOVAPSrr,    X86::MOVAPSmr,      TB_FOLDED_STORE | TB_ALIGN_16 },
-    { X86::MOVDQArr,    X86::MOVDQAmr,      TB_FOLDED_STORE | TB_ALIGN_16 },
-    { X86::MOVPDI2DIrr, X86::MOVPDI2DImr,   TB_FOLDED_STORE },
-    { X86::MOVPQIto64rr,X86::MOVPQI2QImr,   TB_FOLDED_STORE },
-    { X86::MOVSDto64rr, X86::MOVSDto64mr,   TB_FOLDED_STORE },
-    { X86::MOVSS2DIrr,  X86::MOVSS2DImr,    TB_FOLDED_STORE },
-    { X86::MOVUPDrr,    X86::MOVUPDmr,      TB_FOLDED_STORE },
-    { X86::MOVUPSrr,    X86::MOVUPSmr,      TB_FOLDED_STORE },
+    { X86::MOVAPDrr,    X86::MOVAPDmr,      TB_FOLDED_STORE | TB_ALIGN_16 | TB_MUST_FORWARD },
+    { X86::MOVAPSrr,    X86::MOVAPSmr,      TB_FOLDED_STORE | TB_ALIGN_16 | TB_MUST_FORWARD },
+    { X86::MOVDQArr,    X86::MOVDQAmr,      TB_FOLDED_STORE | TB_ALIGN_16 | TB_MUST_FORWARD },
+    { X86::MOVPDI2DIrr, X86::MOVPDI2DImr,   TB_FOLDED_STORE | TB_MUST_FORWARD },
+    { X86::MOVPQIto64rr,X86::MOVPQI2QImr,   TB_FOLDED_STORE | TB_MUST_FORWARD },
+    { X86::MOVSDto64rr, X86::MOVSDto64mr,   TB_FOLDED_STORE | TB_MUST_FORWARD },
+    { X86::MOVSS2DIrr,  X86::MOVSS2DImr,    TB_FOLDED_STORE | TB_MUST_FORWARD },
+    { X86::MOVUPDrr,    X86::MOVUPDmr,      TB_FOLDED_STORE | TB_MUST_FORWARD },
+    { X86::MOVUPSrr,    X86::MOVUPSmr,      TB_FOLDED_STORE | TB_MUST_FORWARD },
     { X86::MUL16r,      X86::MUL16m,        TB_FOLDED_LOAD },
     { X86::MUL32r,      X86::MUL32m,        TB_FOLDED_LOAD },
     { X86::MUL64r,      X86::MUL64m,        TB_FOLDED_LOAD },
@@ -422,8 +430,9 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
   };
 
   for (X86MemoryFoldTableEntry Entry : MemoryFoldTable0) {
+    // Disable forwarding for everything except those marked MUST_FORWARD.
     AddTableEntry(RegOp2MemOpTable0, MemOp2RegOpTable,
-                  Entry.RegOp, Entry.MemOp, TB_INDEX_0 | Entry.Flags);
+                  Entry.RegOp, Entry.MemOp, (TB_INDEX_0 | Entry.Flags) ^ TB_NO_FORWARD);
   }
 
   static const X86MemoryFoldTableEntry MemoryFoldTable1[] = {
@@ -473,32 +482,32 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::Int_CVTTSS2SIrr, X86::Int_CVTTSS2SIrm,     0 },
     { X86::Int_UCOMISDrr,   X86::Int_UCOMISDrm,       0 },
     { X86::Int_UCOMISSrr,   X86::Int_UCOMISSrm,       0 },
-    { X86::MOV16rr,         X86::MOV16rm,             0 },
-    { X86::MOV32rr,         X86::MOV32rm,             0 },
-    { X86::MOV64rr,         X86::MOV64rm,             0 },
-    { X86::MOV64toPQIrr,    X86::MOVQI2PQIrm,         0 },
-    { X86::MOV64toSDrr,     X86::MOV64toSDrm,         0 },
+    { X86::MOV16rr,         X86::MOV16rm,             TB_MUST_FORWARD },
+    { X86::MOV32rr,         X86::MOV32rm,             TB_MUST_FORWARD },
+    { X86::MOV64rr,         X86::MOV64rm,             TB_MUST_FORWARD },
+    { X86::MOV64toPQIrr,    X86::MOVQI2PQIrm,         TB_MUST_FORWARD },
+    { X86::MOV64toSDrr,     X86::MOV64toSDrm,         TB_MUST_FORWARD },
     { X86::MOV8rr,          X86::MOV8rm,              0 },
-    { X86::MOVAPDrr,        X86::MOVAPDrm,            TB_ALIGN_16 },
-    { X86::MOVAPSrr,        X86::MOVAPSrm,            TB_ALIGN_16 },
-    { X86::MOVDDUPrr,       X86::MOVDDUPrm,           0 },
-    { X86::MOVDI2PDIrr,     X86::MOVDI2PDIrm,         0 },
-    { X86::MOVDI2SSrr,      X86::MOVDI2SSrm,          0 },
-    { X86::MOVDQArr,        X86::MOVDQArm,            TB_ALIGN_16 },
-    { X86::MOVSHDUPrr,      X86::MOVSHDUPrm,          TB_ALIGN_16 },
-    { X86::MOVSLDUPrr,      X86::MOVSLDUPrm,          TB_ALIGN_16 },
+    { X86::MOVAPDrr,        X86::MOVAPDrm,            TB_ALIGN_16 | TB_MUST_FORWARD },
+    { X86::MOVAPSrr,        X86::MOVAPSrm,            TB_ALIGN_16 | TB_MUST_FORWARD },
+    { X86::MOVDDUPrr,       X86::MOVDDUPrm,           TB_MUST_FORWARD },
+    { X86::MOVDI2PDIrr,     X86::MOVDI2PDIrm,         TB_MUST_FORWARD },
+    { X86::MOVDI2SSrr,      X86::MOVDI2SSrm,          TB_MUST_FORWARD },
+    { X86::MOVDQArr,        X86::MOVDQArm,            TB_ALIGN_16 | TB_MUST_FORWARD },
+    { X86::MOVSHDUPrr,      X86::MOVSHDUPrm,          TB_ALIGN_16 | TB_MUST_FORWARD },
+    { X86::MOVSLDUPrr,      X86::MOVSLDUPrm,          TB_ALIGN_16 | TB_MUST_FORWARD },
     { X86::MOVSX16rr8,      X86::MOVSX16rm8,          0 },
-    { X86::MOVSX32rr16,     X86::MOVSX32rm16,         0 },
+    { X86::MOVSX32rr16,     X86::MOVSX32rm16,         TB_MUST_FORWARD },
     { X86::MOVSX32rr8,      X86::MOVSX32rm8,          0 },
-    { X86::MOVSX64rr16,     X86::MOVSX64rm16,         0 },
-    { X86::MOVSX64rr32,     X86::MOVSX64rm32,         0 },
+    { X86::MOVSX64rr16,     X86::MOVSX64rm16,         TB_MUST_FORWARD },
+    { X86::MOVSX64rr32,     X86::MOVSX64rm32,         TB_MUST_FORWARD },
     { X86::MOVSX64rr8,      X86::MOVSX64rm8,          0 },
-    { X86::MOVUPDrr,        X86::MOVUPDrm,            TB_ALIGN_16 },
-    { X86::MOVUPSrr,        X86::MOVUPSrm,            0 },
-    { X86::MOVZQI2PQIrr,    X86::MOVZQI2PQIrm,        0 },
-    { X86::MOVZPQILo2PQIrr, X86::MOVZPQILo2PQIrm,     TB_ALIGN_16 },
+    { X86::MOVUPDrr,        X86::MOVUPDrm,            TB_ALIGN_16 | TB_MUST_FORWARD },
+    { X86::MOVUPSrr,        X86::MOVUPSrm,            TB_MUST_FORWARD },
+    { X86::MOVZQI2PQIrr,    X86::MOVZQI2PQIrm,        TB_MUST_FORWARD },
+    { X86::MOVZPQILo2PQIrr, X86::MOVZPQILo2PQIrm,     TB_ALIGN_16 | TB_MUST_FORWARD },
     { X86::MOVZX16rr8,      X86::MOVZX16rm8,          0 },
-    { X86::MOVZX32rr16,     X86::MOVZX32rm16,         0 },
+    { X86::MOVZX32rr16,     X86::MOVZX32rm16,         TB_MUST_FORWARD },
     { X86::MOVZX32_NOREXrr8, X86::MOVZX32_NOREXrm8,   0 },
     { X86::MOVZX32rr8,      X86::MOVZX32rm8,          0 },
     { X86::PABSBrr128,      X86::PABSBrm128,          TB_ALIGN_16 },
@@ -860,7 +869,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     AddTableEntry(RegOp2MemOpTable1, MemOp2RegOpTable,
                   Entry.RegOp, Entry.MemOp,
                   // Index 1, folded load
-                  Entry.Flags | TB_INDEX_1 | TB_FOLDED_LOAD);
+                  (Entry.Flags ^ TB_NO_FORWARD) | TB_INDEX_1 | TB_FOLDED_LOAD );
   }
 
   static const X86MemoryFoldTableEntry MemoryFoldTable2[] = {
@@ -1723,7 +1732,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     AddTableEntry(RegOp2MemOpTable2, MemOp2RegOpTable,
                   Entry.RegOp, Entry.MemOp,
                   // Index 2, folded load
-                  Entry.Flags | TB_INDEX_2 | TB_FOLDED_LOAD);
+                  Entry.Flags | TB_INDEX_2 | TB_FOLDED_LOAD | TB_NO_FORWARD);
   }
 
   static const X86MemoryFoldTableEntry MemoryFoldTable3[] = {
@@ -1936,7 +1945,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     AddTableEntry(RegOp2MemOpTable3, MemOp2RegOpTable,
                   Entry.RegOp, Entry.MemOp,
                   // Index 3, folded load
-                  Entry.Flags | TB_INDEX_3 | TB_FOLDED_LOAD);
+                  Entry.Flags | TB_INDEX_3 | TB_FOLDED_LOAD | TB_NO_FORWARD);
   }
 
   static const X86MemoryFoldTableEntry MemoryFoldTable4[] = {
@@ -1985,7 +1994,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     AddTableEntry(RegOp2MemOpTable4, MemOp2RegOpTable,
                   Entry.RegOp, Entry.MemOp,
                   // Index 4, folded load
-                  Entry.Flags | TB_INDEX_4 | TB_FOLDED_LOAD);
+                  Entry.Flags | TB_INDEX_4 | TB_FOLDED_LOAD | TB_NO_FORWARD);
   }
 }
 
