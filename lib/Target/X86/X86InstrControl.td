@@ -122,21 +122,21 @@ let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in {
   def JMP16r     : I<0xFF, MRM4r, (outs), (ins GR16:$dst), "jmp{w}\t{*}$dst",
                      [(brind GR16:$dst)], IIC_JMP_REG>, Requires<[Not64BitMode]>,
                    OpSize16, Sched<[WriteJump]>;
-  def JMP16m     : I<0xFF, MRM4m, (outs), (ins i16mem:$dst), "jmp{w}\t{*}$dst",
+  def JMP16m     : CISC_I<0xFF, MRM4m, (outs), (ins i16mem:$dst), "jmp{w}\t{*}$dst",
                      [(brind (loadi16 addr:$dst))], IIC_JMP_MEM>,
                    Requires<[Not64BitMode]>, OpSize16, Sched<[WriteJumpLd]>;
 
   def JMP32r     : I<0xFF, MRM4r, (outs), (ins GR32:$dst), "jmp{l}\t{*}$dst",
                      [(brind GR32:$dst)], IIC_JMP_REG>, Requires<[Not64BitMode]>,
                    OpSize32, Sched<[WriteJump]>;
-  def JMP32m     : I<0xFF, MRM4m, (outs), (ins i32mem:$dst), "jmp{l}\t{*}$dst",
+  def JMP32m     : CISC_I<0xFF, MRM4m, (outs), (ins i32mem:$dst), "jmp{l}\t{*}$dst",
                      [(brind (loadi32 addr:$dst))], IIC_JMP_MEM>,
                    Requires<[Not64BitMode]>, OpSize32, Sched<[WriteJumpLd]>;
 
   def JMP64r     : I<0xFF, MRM4r, (outs), (ins GR64:$dst), "jmp{q}\t{*}$dst",
                      [(brind GR64:$dst)], IIC_JMP_REG>, Requires<[In64BitMode]>,
                    Sched<[WriteJump]>;
-  def JMP64m     : I<0xFF, MRM4m, (outs), (ins i64mem:$dst), "jmp{q}\t{*}$dst",
+  def JMP64m     : CISC_I<0xFF, MRM4m, (outs), (ins i64mem:$dst), "jmp{q}\t{*}$dst",
                      [(brind (loadi64 addr:$dst))], IIC_JMP_MEM>,
                    Requires<[In64BitMode]>, Sched<[WriteJumpLd]>;
 
@@ -154,10 +154,10 @@ let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in {
                       "ljmp{q}\t{*}$dst", [], IIC_JMP_FAR_MEM>,
                    Sched<[WriteJump]>;
 
-  def FARJMP16m  : I<0xFF, MRM5m, (outs), (ins opaque32mem:$dst),
+  def FARJMP16m  : CISC_I<0xFF, MRM5m, (outs), (ins opaque32mem:$dst),
                      "ljmp{w}\t{*}$dst", [], IIC_JMP_FAR_MEM>, OpSize16,
                    Sched<[WriteJumpLd]>;
-  def FARJMP32m  : I<0xFF, MRM5m, (outs), (ins opaque48mem:$dst),
+  def FARJMP32m  : CISC_I<0xFF, MRM5m, (outs), (ins opaque48mem:$dst),
                      "ljmp{l}\t{*}$dst", [], IIC_JMP_FAR_MEM>, OpSize32,
                    Sched<[WriteJumpLd]>;
 }
@@ -191,7 +191,7 @@ let isCall = 1 in
     def CALL16r     : I<0xFF, MRM2r, (outs), (ins GR16:$dst),
                         "call{w}\t{*}$dst", [(X86call GR16:$dst)], IIC_CALL_RI>,
                       OpSize16, Requires<[Not64BitMode]>, Sched<[WriteJump]>;
-    def CALL16m     : I<0xFF, MRM2m, (outs), (ins i16mem:$dst),
+    def CALL16m     : CISC_I<0xFF, MRM2m, (outs), (ins i16mem:$dst),
                         "call{w}\t{*}$dst", [(X86call (loadi16 addr:$dst))],
                         IIC_CALL_MEM>, OpSize16,
                       Requires<[Not64BitMode,FavorMemIndirectCall]>,
@@ -199,7 +199,7 @@ let isCall = 1 in
     def CALL32r     : I<0xFF, MRM2r, (outs), (ins GR32:$dst),
                         "call{l}\t{*}$dst", [(X86call GR32:$dst)], IIC_CALL_RI>,
                       OpSize32, Requires<[Not64BitMode]>, Sched<[WriteJump]>;
-    def CALL32m     : I<0xFF, MRM2m, (outs), (ins i32mem:$dst),
+    def CALL32m     : CISC_I<0xFF, MRM2m, (outs), (ins i32mem:$dst),
                         "call{l}\t{*}$dst", [(X86call (loadi32 addr:$dst))],
                         IIC_CALL_MEM>, OpSize32,
                       Requires<[Not64BitMode,FavorMemIndirectCall]>,
@@ -216,10 +216,10 @@ let isCall = 1 in
                                IIC_CALL_FAR_PTR>, OpSize32, Sched<[WriteJump]>;
     }
 
-    def FARCALL16m  : I<0xFF, MRM3m, (outs), (ins opaque32mem:$dst),
+    def FARCALL16m  : CISC_I<0xFF, MRM3m, (outs), (ins opaque32mem:$dst),
                         "lcall{w}\t{*}$dst", [], IIC_CALL_FAR_MEM>, OpSize16,
                       Sched<[WriteJumpLd]>;
-    def FARCALL32m  : I<0xFF, MRM3m, (outs), (ins opaque48mem:$dst),
+    def FARCALL32m  : CISC_I<0xFF, MRM3m, (outs), (ins opaque48mem:$dst),
                         "lcall{l}\t{*}$dst", [], IIC_CALL_FAR_MEM>, OpSize32,
                       Sched<[WriteJumpLd]>;
   }
@@ -247,7 +247,7 @@ let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1,
   def TAILJMPr : I<0xFF, MRM4r, (outs), (ins ptr_rc_tailcall:$dst),
                    "", [], IIC_JMP_REG>;  // FIXME: Remove encoding when JIT is dead.
   let mayLoad = 1 in
-  def TAILJMPm : I<0xFF, MRM4m, (outs), (ins i32mem_TC:$dst),
+  def TAILJMPm : CISC_I<0xFF, MRM4m, (outs), (ins i32mem_TC:$dst),
                    "jmp{l}\t{*}$dst", [], IIC_JMP_MEM>;
 }
 
@@ -271,7 +271,7 @@ let isCall = 1, Uses = [RSP], SchedRW = [WriteJump] in {
                         "call{q}\t{*}$dst", [(X86call GR64:$dst)],
                         IIC_CALL_RI>,
                       Requires<[In64BitMode]>;
-  def CALL64m       : I<0xFF, MRM2m, (outs), (ins i64mem:$dst),
+  def CALL64m       : CISC_I<0xFF, MRM2m, (outs), (ins i64mem:$dst),
                         "call{q}\t{*}$dst", [(X86call (loadi64 addr:$dst))],
                         IIC_CALL_MEM>,
                       Requires<[In64BitMode,FavorMemIndirectCall]>;
@@ -298,7 +298,7 @@ let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1,
                      "jmp{q}\t{*}$dst", [], IIC_JMP_MEM>;
 
   let mayLoad = 1 in
-  def TAILJMPm64 : I<0xFF, MRM4m, (outs), (ins i64mem_TC:$dst),
+  def TAILJMPm64 : CISC_I<0xFF, MRM4m, (outs), (ins i64mem_TC:$dst),
                      "jmp{q}\t{*}$dst", [], IIC_JMP_MEM>;
 
   // Win64 wants jumps leaving the function to have a REX_W prefix.
@@ -310,7 +310,7 @@ let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1,
                            "rex64 jmp{q}\t{*}$dst", [], IIC_JMP_MEM>;
 
     let mayLoad = 1 in
-    def TAILJMPm64_REX : I<0xFF, MRM4m, (outs), (ins i64mem_TC:$dst),
+    def TAILJMPm64_REX : CISC_I<0xFF, MRM4m, (outs), (ins i64mem_TC:$dst),
                            "rex64 jmp{q}\t{*}$dst", [], IIC_JMP_MEM>;
   }
 }

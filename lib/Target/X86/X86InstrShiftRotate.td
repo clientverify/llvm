@@ -70,52 +70,52 @@ let SchedRW = [WriteShiftLd, WriteRMW] in {
 // FIXME: Why do we need an explicit "Uses = [CL]" when the instr has a pattern
 // using CL?
 let Uses = [CL] in {
-def SHL8mCL  : I<0xD2, MRM4m, (outs), (ins i8mem :$dst),
+def SHL8mCL  : CISC_I<0xD2, MRM4m, (outs), (ins i8mem :$dst),
                  "shl{b}\t{%cl, $dst|$dst, cl}",
                  [(store (shl (loadi8 addr:$dst), CL), addr:$dst)], IIC_SR>;
-def SHL16mCL : I<0xD3, MRM4m, (outs), (ins i16mem:$dst),
+def SHL16mCL : CISC_I<0xD3, MRM4m, (outs), (ins i16mem:$dst),
                  "shl{w}\t{%cl, $dst|$dst, cl}",
                  [(store (shl (loadi16 addr:$dst), CL), addr:$dst)], IIC_SR>,
                  OpSize16;
-def SHL32mCL : I<0xD3, MRM4m, (outs), (ins i32mem:$dst),
+def SHL32mCL : CISC_I<0xD3, MRM4m, (outs), (ins i32mem:$dst),
                  "shl{l}\t{%cl, $dst|$dst, cl}",
                  [(store (shl (loadi32 addr:$dst), CL), addr:$dst)], IIC_SR>,
                  OpSize32;
-def SHL64mCL : RI<0xD3, MRM4m, (outs), (ins i64mem:$dst),
+def SHL64mCL : CISC_RI<0xD3, MRM4m, (outs), (ins i64mem:$dst),
                   "shl{q}\t{%cl, $dst|$dst, cl}",
                   [(store (shl (loadi64 addr:$dst), CL), addr:$dst)], IIC_SR>;
 }
-def SHL8mi   : Ii8<0xC0, MRM4m, (outs), (ins i8mem :$dst, i8imm:$src),
+def SHL8mi   : CISC_Ii8<0xC0, MRM4m, (outs), (ins i8mem :$dst, i8imm:$src),
                    "shl{b}\t{$src, $dst|$dst, $src}",
                 [(store (shl (loadi8 addr:$dst), (i8 imm:$src)), addr:$dst)],
                 IIC_SR>;
-def SHL16mi  : Ii8<0xC1, MRM4m, (outs), (ins i16mem:$dst, i8imm:$src),
+def SHL16mi  : CISC_Ii8<0xC1, MRM4m, (outs), (ins i16mem:$dst, i8imm:$src),
                    "shl{w}\t{$src, $dst|$dst, $src}",
                [(store (shl (loadi16 addr:$dst), (i8 imm:$src)), addr:$dst)],
                IIC_SR>, OpSize16;
-def SHL32mi  : Ii8<0xC1, MRM4m, (outs), (ins i32mem:$dst, i8imm:$src),
+def SHL32mi  : CISC_Ii8<0xC1, MRM4m, (outs), (ins i32mem:$dst, i8imm:$src),
                    "shl{l}\t{$src, $dst|$dst, $src}",
                [(store (shl (loadi32 addr:$dst), (i8 imm:$src)), addr:$dst)],
                IIC_SR>, OpSize32;
-def SHL64mi : RIi8<0xC1, MRM4m, (outs), (ins i64mem:$dst, i8imm:$src),
+def SHL64mi : CISC_RIi8<0xC1, MRM4m, (outs), (ins i64mem:$dst, i8imm:$src),
                   "shl{q}\t{$src, $dst|$dst, $src}",
                  [(store (shl (loadi64 addr:$dst), (i8 imm:$src)), addr:$dst)],
                  IIC_SR>;
 
 // Shift by 1
-def SHL8m1   : I<0xD0, MRM4m, (outs), (ins i8mem :$dst),
+def SHL8m1   : CISC_I<0xD0, MRM4m, (outs), (ins i8mem :$dst),
                  "shl{b}\t$dst",
                 [(store (shl (loadi8 addr:$dst), (i8 1)), addr:$dst)],
                 IIC_SR>;
-def SHL16m1  : I<0xD1, MRM4m, (outs), (ins i16mem:$dst),
+def SHL16m1  : CISC_I<0xD1, MRM4m, (outs), (ins i16mem:$dst),
                  "shl{w}\t$dst",
                [(store (shl (loadi16 addr:$dst), (i8 1)), addr:$dst)],
                IIC_SR>, OpSize16;
-def SHL32m1  : I<0xD1, MRM4m, (outs), (ins i32mem:$dst),
+def SHL32m1  : CISC_I<0xD1, MRM4m, (outs), (ins i32mem:$dst),
                  "shl{l}\t$dst",
                [(store (shl (loadi32 addr:$dst), (i8 1)), addr:$dst)],
                IIC_SR>, OpSize32;
-def SHL64m1 : RI<0xD1, MRM4m, (outs), (ins i64mem:$dst),
+def SHL64m1 : CISC_RI<0xD1, MRM4m, (outs), (ins i64mem:$dst),
                   "shl{q}\t$dst",
                  [(store (shl (loadi64 addr:$dst), (i8 1)), addr:$dst)],
                  IIC_SR>;
@@ -170,52 +170,52 @@ def SHR64r1  : RI<0xD1, MRM5r, (outs GR64:$dst), (ins GR64:$src1),
 
 let SchedRW = [WriteShiftLd, WriteRMW] in {
 let Uses = [CL] in {
-def SHR8mCL  : I<0xD2, MRM5m, (outs), (ins i8mem :$dst),
+def SHR8mCL  : CISC_I<0xD2, MRM5m, (outs), (ins i8mem :$dst),
                  "shr{b}\t{%cl, $dst|$dst, cl}",
                  [(store (srl (loadi8 addr:$dst), CL), addr:$dst)], IIC_SR>;
-def SHR16mCL : I<0xD3, MRM5m, (outs), (ins i16mem:$dst),
+def SHR16mCL : CISC_I<0xD3, MRM5m, (outs), (ins i16mem:$dst),
                  "shr{w}\t{%cl, $dst|$dst, cl}",
                  [(store (srl (loadi16 addr:$dst), CL), addr:$dst)], IIC_SR>,
                  OpSize16;
-def SHR32mCL : I<0xD3, MRM5m, (outs), (ins i32mem:$dst),
+def SHR32mCL : CISC_I<0xD3, MRM5m, (outs), (ins i32mem:$dst),
                  "shr{l}\t{%cl, $dst|$dst, cl}",
                  [(store (srl (loadi32 addr:$dst), CL), addr:$dst)], IIC_SR>,
                  OpSize32;
-def SHR64mCL : RI<0xD3, MRM5m, (outs), (ins i64mem:$dst),
+def SHR64mCL : CISC_RI<0xD3, MRM5m, (outs), (ins i64mem:$dst),
                   "shr{q}\t{%cl, $dst|$dst, cl}",
                   [(store (srl (loadi64 addr:$dst), CL), addr:$dst)], IIC_SR>;
 }
-def SHR8mi   : Ii8<0xC0, MRM5m, (outs), (ins i8mem :$dst, i8imm:$src),
+def SHR8mi   : CISC_Ii8<0xC0, MRM5m, (outs), (ins i8mem :$dst, i8imm:$src),
                    "shr{b}\t{$src, $dst|$dst, $src}",
                 [(store (srl (loadi8 addr:$dst), (i8 imm:$src)), addr:$dst)],
                 IIC_SR>;
-def SHR16mi  : Ii8<0xC1, MRM5m, (outs), (ins i16mem:$dst, i8imm:$src),
+def SHR16mi  : CISC_Ii8<0xC1, MRM5m, (outs), (ins i16mem:$dst, i8imm:$src),
                    "shr{w}\t{$src, $dst|$dst, $src}",
                [(store (srl (loadi16 addr:$dst), (i8 imm:$src)), addr:$dst)],
                IIC_SR>, OpSize16;
-def SHR32mi  : Ii8<0xC1, MRM5m, (outs), (ins i32mem:$dst, i8imm:$src),
+def SHR32mi  : CISC_Ii8<0xC1, MRM5m, (outs), (ins i32mem:$dst, i8imm:$src),
                    "shr{l}\t{$src, $dst|$dst, $src}",
                [(store (srl (loadi32 addr:$dst), (i8 imm:$src)), addr:$dst)],
                IIC_SR>, OpSize32;
-def SHR64mi : RIi8<0xC1, MRM5m, (outs), (ins i64mem:$dst, i8imm:$src),
+def SHR64mi : CISC_RIi8<0xC1, MRM5m, (outs), (ins i64mem:$dst, i8imm:$src),
                   "shr{q}\t{$src, $dst|$dst, $src}",
                  [(store (srl (loadi64 addr:$dst), (i8 imm:$src)), addr:$dst)],
                  IIC_SR>;
 
 // Shift by 1
-def SHR8m1   : I<0xD0, MRM5m, (outs), (ins i8mem :$dst),
+def SHR8m1   : CISC_I<0xD0, MRM5m, (outs), (ins i8mem :$dst),
                  "shr{b}\t$dst",
                 [(store (srl (loadi8 addr:$dst), (i8 1)), addr:$dst)],
                 IIC_SR>;
-def SHR16m1  : I<0xD1, MRM5m, (outs), (ins i16mem:$dst),
+def SHR16m1  : CISC_I<0xD1, MRM5m, (outs), (ins i16mem:$dst),
                  "shr{w}\t$dst",
                [(store (srl (loadi16 addr:$dst), (i8 1)), addr:$dst)],
                IIC_SR>, OpSize16;
-def SHR32m1  : I<0xD1, MRM5m, (outs), (ins i32mem:$dst),
+def SHR32m1  : CISC_I<0xD1, MRM5m, (outs), (ins i32mem:$dst),
                  "shr{l}\t$dst",
                [(store (srl (loadi32 addr:$dst), (i8 1)), addr:$dst)],
                IIC_SR>, OpSize32;
-def SHR64m1 : RI<0xD1, MRM5m, (outs), (ins i64mem:$dst),
+def SHR64m1 : CISC_RI<0xD1, MRM5m, (outs), (ins i64mem:$dst),
                   "shr{q}\t$dst",
                  [(store (srl (loadi64 addr:$dst), (i8 1)), addr:$dst)],
                  IIC_SR>;
@@ -281,54 +281,54 @@ def SAR64r1  : RI<0xD1, MRM7r, (outs GR64:$dst), (ins GR64:$src1),
 
 let SchedRW = [WriteShiftLd, WriteRMW] in {
 let Uses = [CL] in {
-def SAR8mCL  : I<0xD2, MRM7m, (outs), (ins i8mem :$dst),
+def SAR8mCL  : CISC_I<0xD2, MRM7m, (outs), (ins i8mem :$dst),
                  "sar{b}\t{%cl, $dst|$dst, cl}",
                  [(store (sra (loadi8 addr:$dst), CL), addr:$dst)],
                  IIC_SR>;
-def SAR16mCL : I<0xD3, MRM7m, (outs), (ins i16mem:$dst),
+def SAR16mCL : CISC_I<0xD3, MRM7m, (outs), (ins i16mem:$dst),
                  "sar{w}\t{%cl, $dst|$dst, cl}",
                  [(store (sra (loadi16 addr:$dst), CL), addr:$dst)],
                  IIC_SR>, OpSize16;
-def SAR32mCL : I<0xD3, MRM7m, (outs), (ins i32mem:$dst),
+def SAR32mCL : CISC_I<0xD3, MRM7m, (outs), (ins i32mem:$dst),
                  "sar{l}\t{%cl, $dst|$dst, cl}",
                  [(store (sra (loadi32 addr:$dst), CL), addr:$dst)],
                  IIC_SR>, OpSize32;
-def SAR64mCL : RI<0xD3, MRM7m, (outs), (ins i64mem:$dst),
+def SAR64mCL : CISC_RI<0xD3, MRM7m, (outs), (ins i64mem:$dst),
                  "sar{q}\t{%cl, $dst|$dst, cl}",
                  [(store (sra (loadi64 addr:$dst), CL), addr:$dst)],
                  IIC_SR>;
 }
-def SAR8mi   : Ii8<0xC0, MRM7m, (outs), (ins i8mem :$dst, i8imm:$src),
+def SAR8mi   : CISC_Ii8<0xC0, MRM7m, (outs), (ins i8mem :$dst, i8imm:$src),
                    "sar{b}\t{$src, $dst|$dst, $src}",
                 [(store (sra (loadi8 addr:$dst), (i8 imm:$src)), addr:$dst)],
                 IIC_SR>;
-def SAR16mi  : Ii8<0xC1, MRM7m, (outs), (ins i16mem:$dst, i8imm:$src),
+def SAR16mi  : CISC_Ii8<0xC1, MRM7m, (outs), (ins i16mem:$dst, i8imm:$src),
                    "sar{w}\t{$src, $dst|$dst, $src}",
                [(store (sra (loadi16 addr:$dst), (i8 imm:$src)), addr:$dst)],
                IIC_SR>, OpSize16;
-def SAR32mi  : Ii8<0xC1, MRM7m, (outs), (ins i32mem:$dst, i8imm:$src),
+def SAR32mi  : CISC_Ii8<0xC1, MRM7m, (outs), (ins i32mem:$dst, i8imm:$src),
                    "sar{l}\t{$src, $dst|$dst, $src}",
                [(store (sra (loadi32 addr:$dst), (i8 imm:$src)), addr:$dst)],
                IIC_SR>, OpSize32;
-def SAR64mi  : RIi8<0xC1, MRM7m, (outs), (ins i64mem:$dst, i8imm:$src),
+def SAR64mi  : CISC_RIi8<0xC1, MRM7m, (outs), (ins i64mem:$dst, i8imm:$src),
                     "sar{q}\t{$src, $dst|$dst, $src}",
                  [(store (sra (loadi64 addr:$dst), (i8 imm:$src)), addr:$dst)],
                  IIC_SR>;
 
 // Shift by 1
-def SAR8m1   : I<0xD0, MRM7m, (outs), (ins i8mem :$dst),
+def SAR8m1   : CISC_I<0xD0, MRM7m, (outs), (ins i8mem :$dst),
                  "sar{b}\t$dst",
                 [(store (sra (loadi8 addr:$dst), (i8 1)), addr:$dst)],
                 IIC_SR>;
-def SAR16m1  : I<0xD1, MRM7m, (outs), (ins i16mem:$dst),
+def SAR16m1  : CISC_I<0xD1, MRM7m, (outs), (ins i16mem:$dst),
                  "sar{w}\t$dst",
                [(store (sra (loadi16 addr:$dst), (i8 1)), addr:$dst)],
                IIC_SR>, OpSize16;
-def SAR32m1  : I<0xD1, MRM7m, (outs), (ins i32mem:$dst),
+def SAR32m1  : CISC_I<0xD1, MRM7m, (outs), (ins i32mem:$dst),
                  "sar{l}\t$dst",
                [(store (sra (loadi32 addr:$dst), (i8 1)), addr:$dst)],
                IIC_SR>, OpSize32;
-def SAR64m1 : RI<0xD1, MRM7m, (outs), (ins i64mem:$dst),
+def SAR64m1 : CISC_RI<0xD1, MRM7m, (outs), (ins i64mem:$dst),
                   "sar{q}\t$dst",
                  [(store (sra (loadi64 addr:$dst), (i8 1)), addr:$dst)],
                  IIC_SR>;
@@ -409,57 +409,57 @@ def RCR64rCL : RI<0xD3, MRM3r, (outs GR64:$dst), (ins GR64:$src1),
 } // Constraints = "$src = $dst"
 
 let SchedRW = [WriteShiftLd, WriteRMW] in {
-def RCL8m1 : I<0xD0, MRM2m, (outs), (ins i8mem:$dst),
+def RCL8m1 : CISC_I<0xD0, MRM2m, (outs), (ins i8mem:$dst),
                "rcl{b}\t$dst", [], IIC_SR>;
-def RCL8mi : Ii8<0xC0, MRM2m, (outs), (ins i8mem:$dst, i8imm:$cnt),
+def RCL8mi : CISC_Ii8<0xC0, MRM2m, (outs), (ins i8mem:$dst, i8imm:$cnt),
                  "rcl{b}\t{$cnt, $dst|$dst, $cnt}", [], IIC_SR>;
-def RCL16m1 : I<0xD1, MRM2m, (outs), (ins i16mem:$dst),
+def RCL16m1 : CISC_I<0xD1, MRM2m, (outs), (ins i16mem:$dst),
                 "rcl{w}\t$dst", [], IIC_SR>, OpSize16;
-def RCL16mi : Ii8<0xC1, MRM2m, (outs), (ins i16mem:$dst, i8imm:$cnt),
+def RCL16mi : CISC_Ii8<0xC1, MRM2m, (outs), (ins i16mem:$dst, i8imm:$cnt),
                   "rcl{w}\t{$cnt, $dst|$dst, $cnt}", [], IIC_SR>, OpSize16;
-def RCL32m1 : I<0xD1, MRM2m, (outs), (ins i32mem:$dst),
+def RCL32m1 : CISC_I<0xD1, MRM2m, (outs), (ins i32mem:$dst),
                 "rcl{l}\t$dst", [], IIC_SR>, OpSize32;
-def RCL32mi : Ii8<0xC1, MRM2m, (outs), (ins i32mem:$dst, i8imm:$cnt),
+def RCL32mi : CISC_Ii8<0xC1, MRM2m, (outs), (ins i32mem:$dst, i8imm:$cnt),
                   "rcl{l}\t{$cnt, $dst|$dst, $cnt}", [], IIC_SR>, OpSize32;
-def RCL64m1 : RI<0xD1, MRM2m, (outs), (ins i64mem:$dst),
+def RCL64m1 : CISC_RI<0xD1, MRM2m, (outs), (ins i64mem:$dst),
                  "rcl{q}\t$dst", [], IIC_SR>;
-def RCL64mi : RIi8<0xC1, MRM2m, (outs), (ins i64mem:$dst, i8imm:$cnt),
+def RCL64mi : CISC_RIi8<0xC1, MRM2m, (outs), (ins i64mem:$dst, i8imm:$cnt),
                    "rcl{q}\t{$cnt, $dst|$dst, $cnt}", [], IIC_SR>;
 
-def RCR8m1 : I<0xD0, MRM3m, (outs), (ins i8mem:$dst),
+def RCR8m1 : CISC_I<0xD0, MRM3m, (outs), (ins i8mem:$dst),
                "rcr{b}\t$dst", [], IIC_SR>;
-def RCR8mi : Ii8<0xC0, MRM3m, (outs), (ins i8mem:$dst, i8imm:$cnt),
+def RCR8mi : CISC_Ii8<0xC0, MRM3m, (outs), (ins i8mem:$dst, i8imm:$cnt),
                  "rcr{b}\t{$cnt, $dst|$dst, $cnt}", [], IIC_SR>;
-def RCR16m1 : I<0xD1, MRM3m, (outs), (ins i16mem:$dst),
+def RCR16m1 : CISC_I<0xD1, MRM3m, (outs), (ins i16mem:$dst),
                 "rcr{w}\t$dst", [], IIC_SR>, OpSize16;
-def RCR16mi : Ii8<0xC1, MRM3m, (outs), (ins i16mem:$dst, i8imm:$cnt),
+def RCR16mi : CISC_Ii8<0xC1, MRM3m, (outs), (ins i16mem:$dst, i8imm:$cnt),
                   "rcr{w}\t{$cnt, $dst|$dst, $cnt}", [], IIC_SR>, OpSize16;
-def RCR32m1 : I<0xD1, MRM3m, (outs), (ins i32mem:$dst),
+def RCR32m1 : CISC_I<0xD1, MRM3m, (outs), (ins i32mem:$dst),
                 "rcr{l}\t$dst", [], IIC_SR>, OpSize32;
-def RCR32mi : Ii8<0xC1, MRM3m, (outs), (ins i32mem:$dst, i8imm:$cnt),
+def RCR32mi : CISC_Ii8<0xC1, MRM3m, (outs), (ins i32mem:$dst, i8imm:$cnt),
                   "rcr{l}\t{$cnt, $dst|$dst, $cnt}", [], IIC_SR>, OpSize32;
-def RCR64m1 : RI<0xD1, MRM3m, (outs), (ins i64mem:$dst),
+def RCR64m1 : CISC_RI<0xD1, MRM3m, (outs), (ins i64mem:$dst),
                  "rcr{q}\t$dst", [], IIC_SR>;
-def RCR64mi : RIi8<0xC1, MRM3m, (outs), (ins i64mem:$dst, i8imm:$cnt),
+def RCR64mi : CISC_RIi8<0xC1, MRM3m, (outs), (ins i64mem:$dst, i8imm:$cnt),
                    "rcr{q}\t{$cnt, $dst|$dst, $cnt}", [], IIC_SR>;
 
 let Uses = [CL] in {
-def RCL8mCL : I<0xD2, MRM2m, (outs), (ins i8mem:$dst),
+def RCL8mCL : CISC_I<0xD2, MRM2m, (outs), (ins i8mem:$dst),
                 "rcl{b}\t{%cl, $dst|$dst, cl}", [], IIC_SR>;
-def RCL16mCL : I<0xD3, MRM2m, (outs), (ins i16mem:$dst),
+def RCL16mCL : CISC_I<0xD3, MRM2m, (outs), (ins i16mem:$dst),
                  "rcl{w}\t{%cl, $dst|$dst, cl}", [], IIC_SR>, OpSize16;
-def RCL32mCL : I<0xD3, MRM2m, (outs), (ins i32mem:$dst),
+def RCL32mCL : CISC_I<0xD3, MRM2m, (outs), (ins i32mem:$dst),
                  "rcl{l}\t{%cl, $dst|$dst, cl}", [], IIC_SR>, OpSize32;
-def RCL64mCL : RI<0xD3, MRM2m, (outs), (ins i64mem:$dst),
+def RCL64mCL : CISC_RI<0xD3, MRM2m, (outs), (ins i64mem:$dst),
                   "rcl{q}\t{%cl, $dst|$dst, cl}", [], IIC_SR>;
 
-def RCR8mCL : I<0xD2, MRM3m, (outs), (ins i8mem:$dst),
+def RCR8mCL : CISC_I<0xD2, MRM3m, (outs), (ins i8mem:$dst),
                 "rcr{b}\t{%cl, $dst|$dst, cl}", [], IIC_SR>;
-def RCR16mCL : I<0xD3, MRM3m, (outs), (ins i16mem:$dst),
+def RCR16mCL : CISC_I<0xD3, MRM3m, (outs), (ins i16mem:$dst),
                  "rcr{w}\t{%cl, $dst|$dst, cl}", [], IIC_SR>, OpSize16;
-def RCR32mCL : I<0xD3, MRM3m, (outs), (ins i32mem:$dst),
+def RCR32mCL : CISC_I<0xD3, MRM3m, (outs), (ins i32mem:$dst),
                  "rcr{l}\t{%cl, $dst|$dst, cl}", [], IIC_SR>, OpSize32;
-def RCR64mCL : RI<0xD3, MRM3m, (outs), (ins i64mem:$dst),
+def RCR64mCL : CISC_RI<0xD3, MRM3m, (outs), (ins i64mem:$dst),
                   "rcr{q}\t{%cl, $dst|$dst, cl}", [], IIC_SR>;
 }
 } // SchedRW
@@ -520,54 +520,54 @@ def ROL64r1  : RI<0xD1, MRM0r, (outs GR64:$dst), (ins GR64:$src1),
 
 let SchedRW = [WriteShiftLd, WriteRMW] in {
 let Uses = [CL] in {
-def ROL8mCL  : I<0xD2, MRM0m, (outs), (ins i8mem :$dst),
+def ROL8mCL  : CISC_I<0xD2, MRM0m, (outs), (ins i8mem :$dst),
                  "rol{b}\t{%cl, $dst|$dst, cl}",
                  [(store (rotl (loadi8 addr:$dst), CL), addr:$dst)],
                  IIC_SR>;
-def ROL16mCL : I<0xD3, MRM0m, (outs), (ins i16mem:$dst),
+def ROL16mCL : CISC_I<0xD3, MRM0m, (outs), (ins i16mem:$dst),
                  "rol{w}\t{%cl, $dst|$dst, cl}",
                  [(store (rotl (loadi16 addr:$dst), CL), addr:$dst)],
                  IIC_SR>, OpSize16;
-def ROL32mCL : I<0xD3, MRM0m, (outs), (ins i32mem:$dst),
+def ROL32mCL : CISC_I<0xD3, MRM0m, (outs), (ins i32mem:$dst),
                  "rol{l}\t{%cl, $dst|$dst, cl}",
                  [(store (rotl (loadi32 addr:$dst), CL), addr:$dst)],
                  IIC_SR>, OpSize32;
-def ROL64mCL :  RI<0xD3, MRM0m, (outs), (ins i64mem:$dst),
+def ROL64mCL :  CISC_RI<0xD3, MRM0m, (outs), (ins i64mem:$dst),
                    "rol{q}\t{%cl, $dst|$dst, cl}",
                    [(store (rotl (loadi64 addr:$dst), CL), addr:$dst)],
                    IIC_SR>;
 }
-def ROL8mi   : Ii8<0xC0, MRM0m, (outs), (ins i8mem :$dst, i8imm:$src1),
+def ROL8mi   : CISC_Ii8<0xC0, MRM0m, (outs), (ins i8mem :$dst, i8imm:$src1),
                    "rol{b}\t{$src1, $dst|$dst, $src1}",
                [(store (rotl (loadi8 addr:$dst), (i8 imm:$src1)), addr:$dst)],
                IIC_SR>;
-def ROL16mi  : Ii8<0xC1, MRM0m, (outs), (ins i16mem:$dst, i8imm:$src1),
+def ROL16mi  : CISC_Ii8<0xC1, MRM0m, (outs), (ins i16mem:$dst, i8imm:$src1),
                    "rol{w}\t{$src1, $dst|$dst, $src1}",
               [(store (rotl (loadi16 addr:$dst), (i8 imm:$src1)), addr:$dst)],
               IIC_SR>, OpSize16;
-def ROL32mi  : Ii8<0xC1, MRM0m, (outs), (ins i32mem:$dst, i8imm:$src1),
+def ROL32mi  : CISC_Ii8<0xC1, MRM0m, (outs), (ins i32mem:$dst, i8imm:$src1),
                    "rol{l}\t{$src1, $dst|$dst, $src1}",
               [(store (rotl (loadi32 addr:$dst), (i8 imm:$src1)), addr:$dst)],
               IIC_SR>, OpSize32;
-def ROL64mi  : RIi8<0xC1, MRM0m, (outs), (ins i64mem:$dst, i8imm:$src1),
+def ROL64mi  : CISC_RIi8<0xC1, MRM0m, (outs), (ins i64mem:$dst, i8imm:$src1),
                     "rol{q}\t{$src1, $dst|$dst, $src1}",
                 [(store (rotl (loadi64 addr:$dst), (i8 imm:$src1)), addr:$dst)],
                 IIC_SR>;
 
 // Rotate by 1
-def ROL8m1   : I<0xD0, MRM0m, (outs), (ins i8mem :$dst),
+def ROL8m1   : CISC_I<0xD0, MRM0m, (outs), (ins i8mem :$dst),
                  "rol{b}\t$dst",
                [(store (rotl (loadi8 addr:$dst), (i8 1)), addr:$dst)],
                IIC_SR>;
-def ROL16m1  : I<0xD1, MRM0m, (outs), (ins i16mem:$dst),
+def ROL16m1  : CISC_I<0xD1, MRM0m, (outs), (ins i16mem:$dst),
                  "rol{w}\t$dst",
               [(store (rotl (loadi16 addr:$dst), (i8 1)), addr:$dst)],
               IIC_SR>, OpSize16;
-def ROL32m1  : I<0xD1, MRM0m, (outs), (ins i32mem:$dst),
+def ROL32m1  : CISC_I<0xD1, MRM0m, (outs), (ins i32mem:$dst),
                  "rol{l}\t$dst",
               [(store (rotl (loadi32 addr:$dst), (i8 1)), addr:$dst)],
               IIC_SR>, OpSize32;
-def ROL64m1  : RI<0xD1, MRM0m, (outs), (ins i64mem:$dst),
+def ROL64m1  : CISC_RI<0xD1, MRM0m, (outs), (ins i64mem:$dst),
                  "rol{q}\t$dst",
                [(store (rotl (loadi64 addr:$dst), (i8 1)), addr:$dst)],
                IIC_SR>;
@@ -627,54 +627,54 @@ def ROR64r1  : RI<0xD1, MRM1r, (outs GR64:$dst), (ins GR64:$src1),
 
 let SchedRW = [WriteShiftLd, WriteRMW] in {
 let Uses = [CL] in {
-def ROR8mCL  : I<0xD2, MRM1m, (outs), (ins i8mem :$dst),
+def ROR8mCL  : CISC_I<0xD2, MRM1m, (outs), (ins i8mem :$dst),
                  "ror{b}\t{%cl, $dst|$dst, cl}",
                  [(store (rotr (loadi8 addr:$dst), CL), addr:$dst)],
                  IIC_SR>;
-def ROR16mCL : I<0xD3, MRM1m, (outs), (ins i16mem:$dst),
+def ROR16mCL : CISC_I<0xD3, MRM1m, (outs), (ins i16mem:$dst),
                  "ror{w}\t{%cl, $dst|$dst, cl}",
                  [(store (rotr (loadi16 addr:$dst), CL), addr:$dst)],
                  IIC_SR>, OpSize16;
-def ROR32mCL : I<0xD3, MRM1m, (outs), (ins i32mem:$dst),
+def ROR32mCL : CISC_I<0xD3, MRM1m, (outs), (ins i32mem:$dst),
                  "ror{l}\t{%cl, $dst|$dst, cl}",
                  [(store (rotr (loadi32 addr:$dst), CL), addr:$dst)],
                  IIC_SR>, OpSize32;
-def ROR64mCL : RI<0xD3, MRM1m, (outs), (ins i64mem:$dst),
+def ROR64mCL : CISC_RI<0xD3, MRM1m, (outs), (ins i64mem:$dst),
                   "ror{q}\t{%cl, $dst|$dst, cl}",
                   [(store (rotr (loadi64 addr:$dst), CL), addr:$dst)],
                   IIC_SR>;
 }
-def ROR8mi   : Ii8<0xC0, MRM1m, (outs), (ins i8mem :$dst, i8imm:$src),
+def ROR8mi   : CISC_Ii8<0xC0, MRM1m, (outs), (ins i8mem :$dst, i8imm:$src),
                    "ror{b}\t{$src, $dst|$dst, $src}",
                [(store (rotr (loadi8 addr:$dst), (i8 imm:$src)), addr:$dst)],
                IIC_SR>;
-def ROR16mi  : Ii8<0xC1, MRM1m, (outs), (ins i16mem:$dst, i8imm:$src),
+def ROR16mi  : CISC_Ii8<0xC1, MRM1m, (outs), (ins i16mem:$dst, i8imm:$src),
                    "ror{w}\t{$src, $dst|$dst, $src}",
               [(store (rotr (loadi16 addr:$dst), (i8 imm:$src)), addr:$dst)],
               IIC_SR>, OpSize16;
-def ROR32mi  : Ii8<0xC1, MRM1m, (outs), (ins i32mem:$dst, i8imm:$src),
+def ROR32mi  : CISC_Ii8<0xC1, MRM1m, (outs), (ins i32mem:$dst, i8imm:$src),
                    "ror{l}\t{$src, $dst|$dst, $src}",
               [(store (rotr (loadi32 addr:$dst), (i8 imm:$src)), addr:$dst)],
               IIC_SR>, OpSize32;
-def ROR64mi  : RIi8<0xC1, MRM1m, (outs), (ins i64mem:$dst, i8imm:$src),
+def ROR64mi  : CISC_RIi8<0xC1, MRM1m, (outs), (ins i64mem:$dst, i8imm:$src),
                     "ror{q}\t{$src, $dst|$dst, $src}",
                 [(store (rotr (loadi64 addr:$dst), (i8 imm:$src)), addr:$dst)],
                 IIC_SR>;
 
 // Rotate by 1
-def ROR8m1   : I<0xD0, MRM1m, (outs), (ins i8mem :$dst),
+def ROR8m1   : CISC_I<0xD0, MRM1m, (outs), (ins i8mem :$dst),
                  "ror{b}\t$dst",
                [(store (rotr (loadi8 addr:$dst), (i8 1)), addr:$dst)],
                IIC_SR>;
-def ROR16m1  : I<0xD1, MRM1m, (outs), (ins i16mem:$dst),
+def ROR16m1  : CISC_I<0xD1, MRM1m, (outs), (ins i16mem:$dst),
                  "ror{w}\t$dst",
               [(store (rotr (loadi16 addr:$dst), (i8 1)), addr:$dst)],
               IIC_SR>, OpSize16;
-def ROR32m1  : I<0xD1, MRM1m, (outs), (ins i32mem:$dst),
+def ROR32m1  : CISC_I<0xD1, MRM1m, (outs), (ins i32mem:$dst),
                  "ror{l}\t$dst",
               [(store (rotr (loadi32 addr:$dst), (i8 1)), addr:$dst)],
               IIC_SR>, OpSize32;
-def ROR64m1  : RI<0xD1, MRM1m, (outs), (ins i64mem:$dst),
+def ROR64m1  : CISC_RI<0xD1, MRM1m, (outs), (ins i64mem:$dst),
                  "ror{q}\t$dst",
                [(store (rotr (loadi64 addr:$dst), (i8 1)), addr:$dst)],
                IIC_SR>;
@@ -772,42 +772,42 @@ def SHRD64rri8 : RIi8<0xAC, MRMDestReg,
 
 let SchedRW = [WriteShiftLd, WriteRMW] in {
 let Uses = [CL] in {
-def SHLD16mrCL : I<0xA5, MRMDestMem, (outs), (ins i16mem:$dst, GR16:$src2),
+def SHLD16mrCL : CISC_I<0xA5, MRMDestMem, (outs), (ins i16mem:$dst, GR16:$src2),
                    "shld{w}\t{%cl, $src2, $dst|$dst, $src2, cl}",
                    [(store (X86shld (loadi16 addr:$dst), GR16:$src2, CL),
                      addr:$dst)], IIC_SHD16_MEM_CL>, TB, OpSize16;
-def SHRD16mrCL : I<0xAD, MRMDestMem, (outs), (ins i16mem:$dst, GR16:$src2),
+def SHRD16mrCL : CISC_I<0xAD, MRMDestMem, (outs), (ins i16mem:$dst, GR16:$src2),
                   "shrd{w}\t{%cl, $src2, $dst|$dst, $src2, cl}",
                   [(store (X86shrd (loadi16 addr:$dst), GR16:$src2, CL),
                     addr:$dst)], IIC_SHD16_MEM_CL>, TB, OpSize16;
 
-def SHLD32mrCL : I<0xA5, MRMDestMem, (outs), (ins i32mem:$dst, GR32:$src2),
+def SHLD32mrCL : CISC_I<0xA5, MRMDestMem, (outs), (ins i32mem:$dst, GR32:$src2),
                    "shld{l}\t{%cl, $src2, $dst|$dst, $src2, cl}",
                    [(store (X86shld (loadi32 addr:$dst), GR32:$src2, CL),
                      addr:$dst)], IIC_SHD32_MEM_CL>, TB, OpSize32;
-def SHRD32mrCL : I<0xAD, MRMDestMem, (outs), (ins i32mem:$dst, GR32:$src2),
+def SHRD32mrCL : CISC_I<0xAD, MRMDestMem, (outs), (ins i32mem:$dst, GR32:$src2),
                   "shrd{l}\t{%cl, $src2, $dst|$dst, $src2, cl}",
                   [(store (X86shrd (loadi32 addr:$dst), GR32:$src2, CL),
                     addr:$dst)], IIC_SHD32_MEM_CL>, TB, OpSize32;
 
-def SHLD64mrCL : RI<0xA5, MRMDestMem, (outs), (ins i64mem:$dst, GR64:$src2),
+def SHLD64mrCL : CISC_RI<0xA5, MRMDestMem, (outs), (ins i64mem:$dst, GR64:$src2),
                     "shld{q}\t{%cl, $src2, $dst|$dst, $src2, cl}",
                     [(store (X86shld (loadi64 addr:$dst), GR64:$src2, CL),
                       addr:$dst)], IIC_SHD64_MEM_CL>, TB;
-def SHRD64mrCL : RI<0xAD, MRMDestMem, (outs), (ins i64mem:$dst, GR64:$src2),
+def SHRD64mrCL : CISC_RI<0xAD, MRMDestMem, (outs), (ins i64mem:$dst, GR64:$src2),
                     "shrd{q}\t{%cl, $src2, $dst|$dst, $src2, cl}",
                     [(store (X86shrd (loadi64 addr:$dst), GR64:$src2, CL),
                       addr:$dst)], IIC_SHD64_MEM_CL>, TB;
 }
 
-def SHLD16mri8 : Ii8<0xA4, MRMDestMem,
+def SHLD16mri8 : CISC_Ii8<0xA4, MRMDestMem,
                     (outs), (ins i16mem:$dst, GR16:$src2, i8imm:$src3),
                     "shld{w}\t{$src3, $src2, $dst|$dst, $src2, $src3}",
                     [(store (X86shld (loadi16 addr:$dst), GR16:$src2,
                                       (i8 imm:$src3)), addr:$dst)],
                                       IIC_SHD16_MEM_IM>,
                     TB, OpSize16;
-def SHRD16mri8 : Ii8<0xAC, MRMDestMem,
+def SHRD16mri8 : CISC_Ii8<0xAC, MRMDestMem,
                      (outs), (ins i16mem:$dst, GR16:$src2, i8imm:$src3),
                      "shrd{w}\t{$src3, $src2, $dst|$dst, $src2, $src3}",
                     [(store (X86shrd (loadi16 addr:$dst), GR16:$src2,
@@ -815,14 +815,14 @@ def SHRD16mri8 : Ii8<0xAC, MRMDestMem,
                                       IIC_SHD16_MEM_IM>,
                      TB, OpSize16;
 
-def SHLD32mri8 : Ii8<0xA4, MRMDestMem,
+def SHLD32mri8 : CISC_Ii8<0xA4, MRMDestMem,
                     (outs), (ins i32mem:$dst, GR32:$src2, i8imm:$src3),
                     "shld{l}\t{$src3, $src2, $dst|$dst, $src2, $src3}",
                     [(store (X86shld (loadi32 addr:$dst), GR32:$src2,
                                       (i8 imm:$src3)), addr:$dst)],
                                       IIC_SHD32_MEM_IM>,
                     TB, OpSize32;
-def SHRD32mri8 : Ii8<0xAC, MRMDestMem,
+def SHRD32mri8 : CISC_Ii8<0xAC, MRMDestMem,
                      (outs), (ins i32mem:$dst, GR32:$src2, i8imm:$src3),
                      "shrd{l}\t{$src3, $src2, $dst|$dst, $src2, $src3}",
                      [(store (X86shrd (loadi32 addr:$dst), GR32:$src2,
@@ -830,14 +830,14 @@ def SHRD32mri8 : Ii8<0xAC, MRMDestMem,
                                        IIC_SHD32_MEM_IM>,
                      TB, OpSize32;
 
-def SHLD64mri8 : RIi8<0xA4, MRMDestMem,
+def SHLD64mri8 : CISC_RIi8<0xA4, MRMDestMem,
                       (outs), (ins i64mem:$dst, GR64:$src2, i8imm:$src3),
                       "shld{q}\t{$src3, $src2, $dst|$dst, $src2, $src3}",
                       [(store (X86shld (loadi64 addr:$dst), GR64:$src2,
                                        (i8 imm:$src3)), addr:$dst)],
                                        IIC_SHD64_MEM_IM>,
                  TB;
-def SHRD64mri8 : RIi8<0xAC, MRMDestMem,
+def SHRD64mri8 : CISC_RIi8<0xAC, MRMDestMem,
                       (outs), (ins i64mem:$dst, GR64:$src2, i8imm:$src3),
                       "shrd{q}\t{$src3, $src2, $dst|$dst, $src2, $src3}",
                       [(store (X86shrd (loadi64 addr:$dst), GR64:$src2,
@@ -864,7 +864,7 @@ let hasSideEffects = 0 in {
                !strconcat(asm, "\t{$src2, $src1, $dst|$dst, $src1, $src2}"),
                []>, TAXD, VEX, Sched<[WriteShift]>;
   let mayLoad = 1 in
-  def mi : Ii8<0xF0, MRMSrcMem, (outs RC:$dst),
+  def mi : CISC_Ii8<0xF0, MRMSrcMem, (outs RC:$dst),
                (ins x86memop:$src1, i8imm:$src2),
                !strconcat(asm, "\t{$src2, $src1, $dst|$dst, $src1, $src2}"),
                []>, TAXD, VEX, Sched<[WriteShiftLd]>;
@@ -877,7 +877,7 @@ let hasSideEffects = 0 in {
              !strconcat(asm, "\t{$src2, $src1, $dst|$dst, $src1, $src2}"), []>,
              VEX_4VOp3, Sched<[WriteShift]>;
   let mayLoad = 1 in
-  def rm : I<0xF7, MRMSrcMem, (outs RC:$dst), (ins x86memop:$src1, RC:$src2),
+  def rm : CISC_I<0xF7, MRMSrcMem, (outs RC:$dst), (ins x86memop:$src1, RC:$src2),
              !strconcat(asm, "\t{$src2, $src1, $dst|$dst, $src1, $src2}"), []>,
              VEX_4VOp3,
              Sched<[WriteShiftLd,

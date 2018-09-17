@@ -86,7 +86,7 @@ multiclass SETCC<bits<8> opc, string Mnemonic, PatLeaf OpNode> {
                      !strconcat(Mnemonic, "\t$dst"),
                      [(set GR8:$dst, (X86setcc OpNode, EFLAGS))],
                      IIC_SET_R>, TB, Sched<[WriteALU]>;
-    def m    : I<opc, MRMXm,  (outs), (ins i8mem:$dst),
+    def m    : CISC_I<opc, MRMXm,  (outs), (ins i8mem:$dst),
                      !strconcat(Mnemonic, "\t$dst"),
                      [(store (X86setcc OpNode, EFLAGS), addr:$dst)],
                      IIC_SET_M>, TB, Sched<[WriteALU, WriteStore]>;
