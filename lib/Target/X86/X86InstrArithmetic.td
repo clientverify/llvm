@@ -83,7 +83,7 @@ def MUL64r : RI<0xF7, MRM4r, (outs), (ins GR64:$src),
                 IIC_MUL64>, Sched<[WriteIMul]>;
 // AL,AH = AL*[mem8]
 let Defs = [AL,EFLAGS,AX], Uses = [AL] in
-def MUL8m  : I<0xF6, MRM4m, (outs), (ins i8mem :$src),
+def MUL8m  : CISC_I<0xF6, MRM4m, (outs), (ins i8mem :$src),
                "mul{b}\t$src",
                // FIXME: Used for 8-bit mul, ignore result upper 8 bits.
                // This probably ought to be moved to a def : Pat<> if the
@@ -93,17 +93,17 @@ def MUL8m  : I<0xF6, MRM4m, (outs), (ins i8mem :$src),
 // AX,DX = AX*[mem16]
 let mayLoad = 1, hasSideEffects = 0 in {
 let Defs = [AX,DX,EFLAGS], Uses = [AX] in
-def MUL16m : I<0xF7, MRM4m, (outs), (ins i16mem:$src),
+def MUL16m : CISC_I<0xF7, MRM4m, (outs), (ins i16mem:$src),
                "mul{w}\t$src",
                [], IIC_MUL16_MEM>, OpSize16, SchedLoadReg<WriteIMulLd>;
 // EAX,EDX = EAX*[mem32]
 let Defs = [EAX,EDX,EFLAGS], Uses = [EAX] in
-def MUL32m : I<0xF7, MRM4m, (outs), (ins i32mem:$src),
+def MUL32m : CISC_I<0xF7, MRM4m, (outs), (ins i32mem:$src),
               "mul{l}\t$src",
               [], IIC_MUL32_MEM>, OpSize32, SchedLoadReg<WriteIMulLd>;
 // RAX,RDX = RAX*[mem64]
 let Defs = [RAX,RDX,EFLAGS], Uses = [RAX] in
-def MUL64m : RI<0xF7, MRM4m, (outs), (ins i64mem:$src),
+def MUL64m : CISC_RI<0xF7, MRM4m, (outs), (ins i64mem:$src),
                 "mul{q}\t$src", [], IIC_MUL64>, SchedLoadReg<WriteIMulLd>;
 }
 
@@ -128,21 +128,21 @@ def IMUL64r : RI<0xF7, MRM5r, (outs), (ins GR64:$src), "imul{q}\t$src", [],
 let mayLoad = 1 in {
 // AL,AH = AL*[mem8]
 let Defs = [AL,EFLAGS,AX], Uses = [AL] in
-def IMUL8m  : I<0xF6, MRM5m, (outs), (ins i8mem :$src),
+def IMUL8m  : CISC_I<0xF6, MRM5m, (outs), (ins i8mem :$src),
                 "imul{b}\t$src", [], IIC_IMUL8>, SchedLoadReg<WriteIMulLd>;
 // AX,DX = AX*[mem16]
 let Defs = [AX,DX,EFLAGS], Uses = [AX] in
-def IMUL16m : I<0xF7, MRM5m, (outs), (ins i16mem:$src),
+def IMUL16m : CISC_I<0xF7, MRM5m, (outs), (ins i16mem:$src),
                 "imul{w}\t$src", [], IIC_IMUL16_MEM>, OpSize16,
               SchedLoadReg<WriteIMulLd>;
 // EAX,EDX = EAX*[mem32]
 let Defs = [EAX,EDX,EFLAGS], Uses = [EAX] in
-def IMUL32m : I<0xF7, MRM5m, (outs), (ins i32mem:$src),
+def IMUL32m : CISC_I<0xF7, MRM5m, (outs), (ins i32mem:$src),
                 "imul{l}\t$src", [], IIC_IMUL32_MEM>, OpSize32,
               SchedLoadReg<WriteIMulLd>;
 // RAX,RDX = RAX*[mem64]
 let Defs = [RAX,RDX,EFLAGS], Uses = [RAX] in
-def IMUL64m : RI<0xF7, MRM5m, (outs), (ins i64mem:$src),
+def IMUL64m : CISC_RI<0xF7, MRM5m, (outs), (ins i64mem:$src),
                  "imul{q}\t$src", [], IIC_IMUL64>, SchedLoadReg<WriteIMulLd>;
 }
 } // hasSideEffects
@@ -174,21 +174,21 @@ def IMUL64rr : RI<0xAF, MRMSrcReg, (outs GR64:$dst),
 
 // Register-Memory Signed Integer Multiply
 let SchedRW = [WriteIMulLd, ReadAfterLd] in {
-def IMUL16rm : I<0xAF, MRMSrcMem, (outs GR16:$dst),
+def IMUL16rm : CISC_I<0xAF, MRMSrcMem, (outs GR16:$dst),
                                   (ins GR16:$src1, i16mem:$src2),
                  "imul{w}\t{$src2, $dst|$dst, $src2}",
                  [(set GR16:$dst, EFLAGS,
                        (X86smul_flag GR16:$src1, (load addr:$src2)))],
                        IIC_IMUL16_RM>,
                TB, OpSize16;
-def IMUL32rm : I<0xAF, MRMSrcMem, (outs GR32:$dst),
+def IMUL32rm : CISC_I<0xAF, MRMSrcMem, (outs GR32:$dst),
                  (ins GR32:$src1, i32mem:$src2),
                  "imul{l}\t{$src2, $dst|$dst, $src2}",
                  [(set GR32:$dst, EFLAGS,
                        (X86smul_flag GR32:$src1, (load addr:$src2)))],
                        IIC_IMUL32_RM>,
                TB, OpSize32;
-def IMUL64rm : RI<0xAF, MRMSrcMem, (outs GR64:$dst),
+def IMUL64rm : CISC_RI<0xAF, MRMSrcMem, (outs GR64:$dst),
                                    (ins GR64:$src1, i64mem:$src2),
                   "imul{q}\t{$src2, $dst|$dst, $src2}",
                   [(set GR64:$dst, EFLAGS,
@@ -244,41 +244,41 @@ def IMUL64rri8 : RIi8<0x6B, MRMSrcReg,                      // GR64 = GR64*I8
 
 // Memory-Integer Signed Integer Multiply
 let SchedRW = [WriteIMulLd] in {
-def IMUL16rmi  : Ii16<0x69, MRMSrcMem,                     // GR16 = [mem16]*I16
+def IMUL16rmi  : CISC_Ii16<0x69, MRMSrcMem,                     // GR16 = [mem16]*I16
                       (outs GR16:$dst), (ins i16mem:$src1, i16imm:$src2),
                       "imul{w}\t{$src2, $src1, $dst|$dst, $src1, $src2}",
                       [(set GR16:$dst, EFLAGS,
                             (X86smul_flag (load addr:$src1), imm:$src2))],
                             IIC_IMUL16_RMI>,
                  OpSize16;
-def IMUL16rmi8 : Ii8<0x6B, MRMSrcMem,                       // GR16 = [mem16]*I8
+def IMUL16rmi8 : CISC_Ii8<0x6B, MRMSrcMem,                       // GR16 = [mem16]*I8
                      (outs GR16:$dst), (ins i16mem:$src1, i16i8imm :$src2),
                      "imul{w}\t{$src2, $src1, $dst|$dst, $src1, $src2}",
                      [(set GR16:$dst, EFLAGS,
                            (X86smul_flag (load addr:$src1),
                                          i16immSExt8:$src2))], IIC_IMUL16_RMI>,
                                          OpSize16;
-def IMUL32rmi  : Ii32<0x69, MRMSrcMem,                     // GR32 = [mem32]*I32
+def IMUL32rmi  : CISC_Ii32<0x69, MRMSrcMem,                     // GR32 = [mem32]*I32
                       (outs GR32:$dst), (ins i32mem:$src1, i32imm:$src2),
                       "imul{l}\t{$src2, $src1, $dst|$dst, $src1, $src2}",
                       [(set GR32:$dst, EFLAGS,
                             (X86smul_flag (load addr:$src1), imm:$src2))],
                             IIC_IMUL32_RMI>, OpSize32;
-def IMUL32rmi8 : Ii8<0x6B, MRMSrcMem,                       // GR32 = [mem32]*I8
+def IMUL32rmi8 : CISC_Ii8<0x6B, MRMSrcMem,                       // GR32 = [mem32]*I8
                      (outs GR32:$dst), (ins i32mem:$src1, i32i8imm: $src2),
                      "imul{l}\t{$src2, $src1, $dst|$dst, $src1, $src2}",
                      [(set GR32:$dst, EFLAGS,
                            (X86smul_flag (load addr:$src1),
                                          i32immSExt8:$src2))],
                                          IIC_IMUL32_RMI>, OpSize32;
-def IMUL64rmi32 : RIi32S<0x69, MRMSrcMem,                   // GR64 = [mem64]*I32
+def IMUL64rmi32 : CISC_RIi32S<0x69, MRMSrcMem,                   // GR64 = [mem64]*I32
                          (outs GR64:$dst), (ins i64mem:$src1, i64i32imm:$src2),
                          "imul{q}\t{$src2, $src1, $dst|$dst, $src1, $src2}",
                          [(set GR64:$dst, EFLAGS,
                               (X86smul_flag (load addr:$src1),
                                             i64immSExt32:$src2))],
                                             IIC_IMUL64_RMI>;
-def IMUL64rmi8 : RIi8<0x6B, MRMSrcMem,                      // GR64 = [mem64]*I8
+def IMUL64rmi8 : CISC_RIi8<0x6B, MRMSrcMem,                      // GR64 = [mem64]*I8
                       (outs GR64:$dst), (ins i64mem:$src1, i64i8imm: $src2),
                       "imul{q}\t{$src2, $src1, $dst|$dst, $src1, $src2}",
                       [(set GR64:$dst, EFLAGS,
@@ -311,20 +311,20 @@ def DIV64r : RI<0xF7, MRM6r, (outs), (ins GR64:$src),
 
 let mayLoad = 1 in {
 let Defs = [AL,AH,EFLAGS], Uses = [AX] in
-def DIV8m  : I<0xF6, MRM6m, (outs), (ins i8mem:$src),   // AX/[mem8] = AL,AH
+def DIV8m  : CISC_I<0xF6, MRM6m, (outs), (ins i8mem:$src),   // AX/[mem8] = AL,AH
                "div{b}\t$src", [], IIC_DIV8_MEM>,
              SchedLoadReg<WriteIDivLd>;
 let Defs = [AX,DX,EFLAGS], Uses = [AX,DX] in
-def DIV16m : I<0xF7, MRM6m, (outs), (ins i16mem:$src),  // DX:AX/[mem16] = AX,DX
+def DIV16m : CISC_I<0xF7, MRM6m, (outs), (ins i16mem:$src),  // DX:AX/[mem16] = AX,DX
                "div{w}\t$src", [], IIC_DIV16>, OpSize16,
              SchedLoadReg<WriteIDivLd>;
 let Defs = [EAX,EDX,EFLAGS], Uses = [EAX,EDX] in    // EDX:EAX/[mem32] = EAX,EDX
-def DIV32m : I<0xF7, MRM6m, (outs), (ins i32mem:$src),
+def DIV32m : CISC_I<0xF7, MRM6m, (outs), (ins i32mem:$src),
                "div{l}\t$src", [], IIC_DIV32>,
              SchedLoadReg<WriteIDivLd>, OpSize32;
 // RDX:RAX/[mem64] = RAX,RDX
 let Defs = [RAX,RDX,EFLAGS], Uses = [RAX,RDX] in
-def DIV64m : RI<0xF7, MRM6m, (outs), (ins i64mem:$src),
+def DIV64m : CISC_RI<0xF7, MRM6m, (outs), (ins i64mem:$src),
                 "div{q}\t$src", [], IIC_DIV64>,
              SchedLoadReg<WriteIDivLd>;
 }
@@ -348,19 +348,19 @@ def IDIV64r: RI<0xF7, MRM7r, (outs), (ins GR64:$src),
 
 let mayLoad = 1 in {
 let Defs = [AL,AH,EFLAGS], Uses = [AX] in
-def IDIV8m : I<0xF6, MRM7m, (outs), (ins i8mem:$src),   // AX/[mem8] = AL,AH
+def IDIV8m : CISC_I<0xF6, MRM7m, (outs), (ins i8mem:$src),   // AX/[mem8] = AL,AH
                "idiv{b}\t$src", [], IIC_IDIV8>,
              SchedLoadReg<WriteIDivLd>;
 let Defs = [AX,DX,EFLAGS], Uses = [AX,DX] in
-def IDIV16m: I<0xF7, MRM7m, (outs), (ins i16mem:$src),  // DX:AX/[mem16] = AX,DX
+def IDIV16m: CISC_I<0xF7, MRM7m, (outs), (ins i16mem:$src),  // DX:AX/[mem16] = AX,DX
                "idiv{w}\t$src", [], IIC_IDIV16>, OpSize16,
              SchedLoadReg<WriteIDivLd>;
 let Defs = [EAX,EDX,EFLAGS], Uses = [EAX,EDX] in    // EDX:EAX/[mem32] = EAX,EDX
-def IDIV32m: I<0xF7, MRM7m, (outs), (ins i32mem:$src),
+def IDIV32m: CISC_I<0xF7, MRM7m, (outs), (ins i32mem:$src),
                "idiv{l}\t$src", [], IIC_IDIV32>, OpSize32,
              SchedLoadReg<WriteIDivLd>;
 let Defs = [RAX,RDX,EFLAGS], Uses = [RAX,RDX] in // RDX:RAX/[mem64] = RAX,RDX
-def IDIV64m: RI<0xF7, MRM7m, (outs), (ins i64mem:$src),
+def IDIV64m: CISC_RI<0xF7, MRM7m, (outs), (ins i64mem:$src),
                 "idiv{q}\t$src", [], IIC_IDIV64>,
              SchedLoadReg<WriteIDivLd>;
 }
@@ -393,19 +393,19 @@ def NEG64r : RI<0xF7, MRM3r, (outs GR64:$dst), (ins GR64:$src1), "neg{q}\t$dst",
 
 // Read-modify-write negate.
 let SchedRW = [WriteALULd, WriteRMW] in {
-def NEG8m  : I<0xF6, MRM3m, (outs), (ins i8mem :$dst),
+def NEG8m  : CISC_I<0xF6, MRM3m, (outs), (ins i8mem :$dst),
                "neg{b}\t$dst",
                [(store (ineg (loadi8 addr:$dst)), addr:$dst),
                 (implicit EFLAGS)], IIC_UNARY_MEM>;
-def NEG16m : I<0xF7, MRM3m, (outs), (ins i16mem:$dst),
+def NEG16m : CISC_I<0xF7, MRM3m, (outs), (ins i16mem:$dst),
                "neg{w}\t$dst",
                [(store (ineg (loadi16 addr:$dst)), addr:$dst),
                 (implicit EFLAGS)], IIC_UNARY_MEM>, OpSize16;
-def NEG32m : I<0xF7, MRM3m, (outs), (ins i32mem:$dst),
+def NEG32m : CISC_I<0xF7, MRM3m, (outs), (ins i32mem:$dst),
                "neg{l}\t$dst",
                [(store (ineg (loadi32 addr:$dst)), addr:$dst),
                 (implicit EFLAGS)], IIC_UNARY_MEM>, OpSize32;
-def NEG64m : RI<0xF7, MRM3m, (outs), (ins i64mem:$dst), "neg{q}\t$dst",
+def NEG64m : CISC_RI<0xF7, MRM3m, (outs), (ins i64mem:$dst), "neg{q}\t$dst",
                 [(store (ineg (loadi64 addr:$dst)), addr:$dst),
                  (implicit EFLAGS)], IIC_UNARY_MEM>;
 } // SchedRW
@@ -432,18 +432,18 @@ def NOT64r : RI<0xF7, MRM2r, (outs GR64:$dst), (ins GR64:$src1), "not{q}\t$dst",
 } // Constraints = "$src1 = $dst", SchedRW
 
 let SchedRW = [WriteALULd, WriteRMW] in {
-def NOT8m  : I<0xF6, MRM2m, (outs), (ins i8mem :$dst),
+def NOT8m  : CISC_I<0xF6, MRM2m, (outs), (ins i8mem :$dst),
                "not{b}\t$dst",
                [(store (not (loadi8 addr:$dst)), addr:$dst)], IIC_UNARY_MEM>;
-def NOT16m : I<0xF7, MRM2m, (outs), (ins i16mem:$dst),
+def NOT16m : CISC_I<0xF7, MRM2m, (outs), (ins i16mem:$dst),
                "not{w}\t$dst",
                [(store (not (loadi16 addr:$dst)), addr:$dst)], IIC_UNARY_MEM>,
                OpSize16;
-def NOT32m : I<0xF7, MRM2m, (outs), (ins i32mem:$dst),
+def NOT32m : CISC_I<0xF7, MRM2m, (outs), (ins i32mem:$dst),
                "not{l}\t$dst",
                [(store (not (loadi32 addr:$dst)), addr:$dst)], IIC_UNARY_MEM>,
                OpSize32;
-def NOT64m : RI<0xF7, MRM2m, (outs), (ins i64mem:$dst), "not{q}\t$dst",
+def NOT64m : CISC_RI<0xF7, MRM2m, (outs), (ins i64mem:$dst), "not{q}\t$dst",
                 [(store (not (loadi64 addr:$dst)), addr:$dst)], IIC_UNARY_MEM>;
 } // SchedRW
 } // CodeSize
@@ -482,16 +482,16 @@ def INC32r_alt : I<0x40, AddRegFrm, (outs GR32:$dst), (ins GR32:$src1),
 } // Constraints = "$src1 = $dst", SchedRW
 
 let CodeSize = 2, SchedRW = [WriteALULd, WriteRMW] in {
-  def INC8m  : I<0xFE, MRM0m, (outs), (ins i8mem :$dst), "inc{b}\t$dst",
+  def INC8m  : CISC_I<0xFE, MRM0m, (outs), (ins i8mem :$dst), "inc{b}\t$dst",
                [(store (add (loadi8 addr:$dst), 1), addr:$dst),
                 (implicit EFLAGS)], IIC_UNARY_MEM>;
-  def INC16m : I<0xFF, MRM0m, (outs), (ins i16mem:$dst), "inc{w}\t$dst",
+  def INC16m : CISC_I<0xFF, MRM0m, (outs), (ins i16mem:$dst), "inc{w}\t$dst",
                [(store (add (loadi16 addr:$dst), 1), addr:$dst),
                 (implicit EFLAGS)], IIC_UNARY_MEM>, OpSize16;
-  def INC32m : I<0xFF, MRM0m, (outs), (ins i32mem:$dst), "inc{l}\t$dst",
+  def INC32m : CISC_I<0xFF, MRM0m, (outs), (ins i32mem:$dst), "inc{l}\t$dst",
                [(store (add (loadi32 addr:$dst), 1), addr:$dst),
                 (implicit EFLAGS)], IIC_UNARY_MEM>, OpSize32;
-  def INC64m : RI<0xFF, MRM0m, (outs), (ins i64mem:$dst), "inc{q}\t$dst",
+  def INC64m : CISC_RI<0xFF, MRM0m, (outs), (ins i64mem:$dst), "inc{q}\t$dst",
                   [(store (add (loadi64 addr:$dst), 1), addr:$dst),
                    (implicit EFLAGS)], IIC_UNARY_MEM>;
 } // CodeSize = 2, SchedRW
@@ -529,16 +529,16 @@ def DEC32r_alt : I<0x48, AddRegFrm, (outs GR32:$dst), (ins GR32:$src1),
 
 
 let CodeSize = 2, SchedRW = [WriteALULd, WriteRMW] in {
-  def DEC8m  : I<0xFE, MRM1m, (outs), (ins i8mem :$dst), "dec{b}\t$dst",
+  def DEC8m  : CISC_I<0xFE, MRM1m, (outs), (ins i8mem :$dst), "dec{b}\t$dst",
                [(store (add (loadi8 addr:$dst), -1), addr:$dst),
                 (implicit EFLAGS)], IIC_UNARY_MEM>;
-  def DEC16m : I<0xFF, MRM1m, (outs), (ins i16mem:$dst), "dec{w}\t$dst",
+  def DEC16m : CISC_I<0xFF, MRM1m, (outs), (ins i16mem:$dst), "dec{w}\t$dst",
                [(store (add (loadi16 addr:$dst), -1), addr:$dst),
                 (implicit EFLAGS)], IIC_UNARY_MEM>, OpSize16;
-  def DEC32m : I<0xFF, MRM1m, (outs), (ins i32mem:$dst), "dec{l}\t$dst",
+  def DEC32m : CISC_I<0xFF, MRM1m, (outs), (ins i32mem:$dst), "dec{l}\t$dst",
                [(store (add (loadi32 addr:$dst), -1), addr:$dst),
                 (implicit EFLAGS)], IIC_UNARY_MEM>, OpSize32;
-  def DEC64m : RI<0xFF, MRM1m, (outs), (ins i64mem:$dst), "dec{q}\t$dst",
+  def DEC64m : CISC_RI<0xFF, MRM1m, (outs), (ins i64mem:$dst), "dec{q}\t$dst",
                   [(store (add (loadi64 addr:$dst), -1), addr:$dst),
                    (implicit EFLAGS)], IIC_UNARY_MEM>;
 } // CodeSize = 2, SchedRW
@@ -722,7 +722,7 @@ class BinOpRM<bits<8> opcode, string mnemonic, X86TypeInfo typeinfo,
               InstrItinClass itin = IIC_BIN_MEM>
   : ITy<opcode, MRMSrcMem, typeinfo, outlist,
         (ins typeinfo.RegClass:$src1, typeinfo.MemOperand:$src2),
-        mnemonic, "{$src2, $src1|$src1, $src2}", pattern, itin>,
+        mnemonic, "{$src2, $src1|$src1, $src2}", [], itin>,
     Sched<[WriteALULd, ReadAfterLd]>;
 
 // BinOpRM_R - Instructions like "add reg, reg, [mem]".
@@ -824,7 +824,7 @@ class BinOpMR<bits<8> opcode, string mnemonic, X86TypeInfo typeinfo,
               list<dag> pattern, InstrItinClass itin = IIC_BIN_MEM>
   : ITy<opcode, MRMDestMem, typeinfo,
         (outs), (ins typeinfo.MemOperand:$dst, typeinfo.RegClass:$src),
-        mnemonic, "{$src, $dst|$dst, $src}", pattern, itin>,
+        mnemonic, "{$src, $dst|$dst, $src}", [], itin>,
     Sched<[WriteALULd, WriteRMW]>;
 
 // BinOpMR_RMW - Instructions like "add [mem], reg".
@@ -854,7 +854,7 @@ class BinOpMI<bits<8> opcode, string mnemonic, X86TypeInfo typeinfo,
               InstrItinClass itin = IIC_BIN_MEM>
   : ITy<opcode, f, typeinfo,
         (outs), (ins typeinfo.MemOperand:$dst, typeinfo.ImmOperand:$src),
-        mnemonic, "{$src, $dst|$dst, $src}", pattern, itin>,
+        mnemonic, "{$src, $dst|$dst, $src}", [], itin>,
     Sched<[WriteALULd, WriteRMW]> {
   let ImmT = typeinfo.ImmEncoding;
 }
@@ -887,7 +887,7 @@ class BinOpMI8<string mnemonic, X86TypeInfo typeinfo,
                InstrItinClass itin = IIC_BIN_MEM>
   : ITy<0x82, f, typeinfo,
         (outs), (ins typeinfo.MemOperand:$dst, typeinfo.Imm8Operand:$src),
-        mnemonic, "{$src, $dst|$dst, $src}", pattern, itin>,
+        mnemonic, "{$src, $dst|$dst, $src}", [], itin>,
     Sched<[WriteALULd, WriteRMW]> {
   let ImmT = Imm8; // Always 8-bit immediate.
 }
@@ -1265,7 +1265,7 @@ multiclass bmi_andn<string mnemonic, RegisterClass RC, X86MemOperand x86memop,
             !strconcat(mnemonic, "\t{$src2, $src1, $dst|$dst, $src1, $src2}"),
             [(set RC:$dst, EFLAGS, (X86and_flag (not RC:$src1), RC:$src2))],
             IIC_BIN_NONMEM>, Sched<[WriteALU]>;
-  def rm : I<0xF2, MRMSrcMem, (outs RC:$dst), (ins RC:$src1, x86memop:$src2),
+  def rm : CISC_I<0xF2, MRMSrcMem, (outs RC:$dst), (ins RC:$src1, x86memop:$src2),
             !strconcat(mnemonic, "\t{$src2, $src1, $dst|$dst, $src1, $src2}"),
             [(set RC:$dst, EFLAGS,
              (X86and_flag (not RC:$src1), (ld_frag addr:$src2)))], IIC_BIN_MEM>,
@@ -1299,7 +1299,7 @@ let hasSideEffects = 0 in {
              [], IIC_MUL8>, T8XD, VEX_4V, Sched<[WriteIMul, WriteIMulH]>;
 
   let mayLoad = 1 in
-  def rm : I<0xF6, MRMSrcMem, (outs RC:$dst1, RC:$dst2), (ins x86memop:$src),
+  def rm : CISC_I<0xF6, MRMSrcMem, (outs RC:$dst1, RC:$dst2), (ins x86memop:$src),
              !strconcat(mnemonic, "\t{$src, $dst2, $dst1|$dst1, $dst2, $src}"),
              [], IIC_MUL8>, T8XD, VEX_4V, Sched<[WriteIMulLd, WriteIMulH]>;
 }
@@ -1331,13 +1331,13 @@ let Predicates = [HasADX], Defs = [EFLAGS], Uses = [EFLAGS],
   } // SchedRW
 
   let mayLoad = 1, SchedRW = [WriteALULd] in {
-  def ADCX32rm : I<0xF6, MRMSrcMem, (outs GR32:$dst),
+  def ADCX32rm : CISC_I<0xF6, MRMSrcMem, (outs GR32:$dst),
              (ins GR32:$src0, i32mem:$src), "adcx{l}\t{$src, $dst|$dst, $src}",
              [(set GR32:$dst, EFLAGS,
                  (X86adc_flag GR32:$src0, (loadi32 addr:$src), EFLAGS))],
              IIC_BIN_CARRY_MEM>, T8PD;
 
-  def ADCX64rm : RI<0xF6, MRMSrcMem, (outs GR64:$dst),
+  def ADCX64rm : CISC_RI<0xF6, MRMSrcMem, (outs GR64:$dst),
              (ins GR64:$src0, i64mem:$src), "adcx{q}\t{$src, $dst|$dst, $src}",
              [(set GR64:$dst, EFLAGS,
                  (X86adc_flag GR64:$src0, (loadi64 addr:$src), EFLAGS))],
@@ -1359,10 +1359,10 @@ let Predicates = [HasADX], hasSideEffects = 0, Defs = [EFLAGS],
   } // SchedRW
 
   let mayLoad = 1, SchedRW = [WriteALULd] in {
-  def ADOX32rm : I<0xF6, MRMSrcMem, (outs GR32:$dst), (ins i32mem:$src),
+  def ADOX32rm : CISC_I<0xF6, MRMSrcMem, (outs GR32:$dst), (ins i32mem:$src),
              "adox{l}\t{$src, $dst|$dst, $src}", [], IIC_BIN_MEM>, T8XS;
 
-  def ADOX64rm : RI<0xF6, MRMSrcMem, (outs GR64:$dst), (ins i64mem:$src),
+  def ADOX64rm : CISC_RI<0xF6, MRMSrcMem, (outs GR64:$dst), (ins i64mem:$src),
              "adox{q}\t{$src, $dst|$dst, $src}", [], IIC_BIN_MEM>, T8XS;
   }
 }

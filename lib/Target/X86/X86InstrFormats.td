@@ -344,6 +344,11 @@ class I<bits<8> o, Format f, dag outs, dag ins, string asm,
   let Pattern = pattern;
   let CodeSize = 3;
 }
+class CISC_I<bits<8> o, Format f, dag outs, dag ins, string asm,
+        list<dag> pattern, InstrItinClass itin = NoItinerary,
+        Domain d = GenericDomain>
+  : I<o, f, outs, ins, asm, [], itin, d>;
+
 class Ii8 <bits<8> o, Format f, dag outs, dag ins, string asm,
            list<dag> pattern, InstrItinClass itin = NoItinerary,
            Domain d = GenericDomain>
@@ -351,30 +356,48 @@ class Ii8 <bits<8> o, Format f, dag outs, dag ins, string asm,
   let Pattern = pattern;
   let CodeSize = 3;
 }
+class CISC_Ii8 <bits<8> o, Format f, dag outs, dag ins, string asm,
+           list<dag> pattern, InstrItinClass itin = NoItinerary,
+           Domain d = GenericDomain>
+  : Ii8<o, f, outs, ins, asm, [], itin, d>;
+
 class Ii8PCRel<bits<8> o, Format f, dag outs, dag ins, string asm,
                list<dag> pattern, InstrItinClass itin = NoItinerary>
   : X86Inst<o, f, Imm8PCRel, outs, ins, asm, itin> {
   let Pattern = pattern;
   let CodeSize = 3;
 }
+
 class Ii16<bits<8> o, Format f, dag outs, dag ins, string asm,
            list<dag> pattern, InstrItinClass itin = NoItinerary>
   : X86Inst<o, f, Imm16, outs, ins, asm, itin> {
   let Pattern = pattern;
   let CodeSize = 3;
 }
+class CISC_Ii16<bits<8> o, Format f, dag outs, dag ins, string asm,
+           list<dag> pattern, InstrItinClass itin = NoItinerary>
+  : Ii16<o, f, outs, ins, asm, [], itin>;
+
 class Ii32<bits<8> o, Format f, dag outs, dag ins, string asm,
            list<dag> pattern, InstrItinClass itin = NoItinerary>
   : X86Inst<o, f, Imm32, outs, ins, asm, itin> {
   let Pattern = pattern;
   let CodeSize = 3;
 }
+class CISC_Ii32<bits<8> o, Format f, dag outs, dag ins, string asm,
+           list<dag> pattern, InstrItinClass itin = NoItinerary>
+  : Ii32<o, f, outs, ins, asm, [], itin>;
+
 class Ii32S<bits<8> o, Format f, dag outs, dag ins, string asm,
             list<dag> pattern, InstrItinClass itin = NoItinerary>
   : X86Inst<o, f, Imm32S, outs, ins, asm, itin> {
   let Pattern = pattern;
   let CodeSize = 3;
 }
+class CISC_Ii32S<bits<8> o, Format f, dag outs, dag ins, string asm,
+           list<dag> pattern, InstrItinClass itin = NoItinerary>
+  : Ii32S<o, f, outs, ins, asm, [], itin>;
+
 
 class Ii16PCRel<bits<8> o, Format f, dag outs, dag ins, string asm,
            list<dag> pattern, InstrItinClass itin = NoItinerary>
@@ -877,18 +900,33 @@ class IXOP5<bits<8> o, Format F, dag outs, dag ins, string asm,
 class RI<bits<8> o, Format F, dag outs, dag ins, string asm,
          list<dag> pattern, InstrItinClass itin = NoItinerary>
       : I<o, F, outs, ins, asm, pattern, itin>, REX_W;
+class CISC_RI<bits<8> o, Format F, dag outs, dag ins, string asm,
+         list<dag> pattern, InstrItinClass itin = NoItinerary>
+      : RI<o, F, outs, ins, asm, [], itin>;
 class RIi8 <bits<8> o, Format F, dag outs, dag ins, string asm,
             list<dag> pattern, InstrItinClass itin = NoItinerary>
       : Ii8<o, F, outs, ins, asm, pattern, itin>, REX_W;
+class CISC_RIi8<bits<8> o, Format F, dag outs, dag ins, string asm,
+         list<dag> pattern, InstrItinClass itin = NoItinerary>
+      : RIi8<o, F, outs, ins, asm, [], itin>;
 class RIi16 <bits<8> o, Format F, dag outs, dag ins, string asm,
             list<dag> pattern, InstrItinClass itin = NoItinerary>
       : Ii16<o, F, outs, ins, asm, pattern, itin>, REX_W;
+class CISC_RIi16<bits<8> o, Format F, dag outs, dag ins, string asm,
+         list<dag> pattern, InstrItinClass itin = NoItinerary>
+      : RIi16<o, F, outs, ins, asm, [], itin>;
 class RIi32 <bits<8> o, Format F, dag outs, dag ins, string asm,
              list<dag> pattern, InstrItinClass itin = NoItinerary>
       : Ii32<o, F, outs, ins, asm, pattern, itin>, REX_W;
+class CISC_RIi32<bits<8> o, Format F, dag outs, dag ins, string asm,
+         list<dag> pattern, InstrItinClass itin = NoItinerary>
+      : RIi32<o, F, outs, ins, asm, [], itin>;
 class RIi32S <bits<8> o, Format F, dag outs, dag ins, string asm,
               list<dag> pattern, InstrItinClass itin = NoItinerary>
       : Ii32S<o, F, outs, ins, asm, pattern, itin>, REX_W;
+class CISC_RIi32S<bits<8> o, Format F, dag outs, dag ins, string asm,
+         list<dag> pattern, InstrItinClass itin = NoItinerary>
+      : RIi32S<o, F, outs, ins, asm, [], itin>;
 
 class RIi64<bits<8> o, Format f, dag outs, dag ins, string asm,
             list<dag> pattern, InstrItinClass itin = NoItinerary>
@@ -896,6 +934,9 @@ class RIi64<bits<8> o, Format f, dag outs, dag ins, string asm,
   let Pattern = pattern;
   let CodeSize = 3;
 }
+class CISC_RIi64<bits<8> o, Format F, dag outs, dag ins, string asm,
+         list<dag> pattern, InstrItinClass itin = NoItinerary>
+      : RIi64<o, F, outs, ins, asm, [], itin>;
 
 class RIi64_NOREX<bits<8> o, Format f, dag outs, dag ins, string asm,
             list<dag> pattern, InstrItinClass itin = NoItinerary>
@@ -903,13 +944,22 @@ class RIi64_NOREX<bits<8> o, Format f, dag outs, dag ins, string asm,
   let Pattern = pattern;
   let CodeSize = 3;
 }
+class CISC_RIi64_NOREX<bits<8> o, Format F, dag outs, dag ins, string asm,
+         list<dag> pattern, InstrItinClass itin = NoItinerary>
+      : RIi64_NOREX<o, F, outs, ins, asm, [], itin>;
 
 class RS2I<bits<8> o, Format F, dag outs, dag ins, string asm,
            list<dag> pattern, InstrItinClass itin = NoItinerary>
       : S2I<o, F, outs, ins, asm, pattern, itin>, REX_W;
+class CISC_RS2I<bits<8> o, Format F, dag outs, dag ins, string asm,
+         list<dag> pattern, InstrItinClass itin = NoItinerary>
+      : RS2I<o, F, outs, ins, asm, [], itin>;
 class VRS2I<bits<8> o, Format F, dag outs, dag ins, string asm,
            list<dag> pattern, InstrItinClass itin = NoItinerary>
       : VS2I<o, F, outs, ins, asm, pattern, itin>, VEX_W;
+class CISC_VRS2I<bits<8> o, Format F, dag outs, dag ins, string asm,
+         list<dag> pattern, InstrItinClass itin = NoItinerary>
+      : VRS2I<o, F, outs, ins, asm, [], itin>;
 
 // MMX Instruction templates
 //
