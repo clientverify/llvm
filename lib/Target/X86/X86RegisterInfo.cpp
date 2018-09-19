@@ -416,17 +416,14 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
     }
   }
 
-  // Reserve R15 for springboard
-  Reserved.set(X86::R15);
-  Reserved.set(X86::R15D);
-  Reserved.set(X86::R15W);
-  Reserved.set(X86::R15B);
+  // Reserve R15 and R14 or springboard to save address and RAX.
+  for (MCSubRegIterator I(X86::R15, this, /*IncludeSelf=*/true); I.isValid();
+       ++I)
+    Reserved.set(*I);
 
-  // Reserve R15 for springboard
-  Reserved.set(X86::R14);
-  Reserved.set(X86::R14D);
-  Reserved.set(X86::R14W);
-  Reserved.set(X86::R14B);
+  for (MCSubRegIterator I(X86::R14, this, /*IncludeSelf=*/true); I.isValid();
+       ++I)
+    Reserved.set(*I);
 
   return Reserved;
 }
