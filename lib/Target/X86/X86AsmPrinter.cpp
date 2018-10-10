@@ -27,6 +27,7 @@
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
+#include "llvm/MC/MCCartridgeRecord.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -702,8 +703,35 @@ void X86AsmPrinter::EmitEndOfAsmFile(Module &M) {
   if (TT.isOSBinFormatELF()) {
     emitStackMaps(SM);
     FM.serializeToFaultMapSection();
+    EmitTASECartridgeRecords();
     return;
   }
+
+}
+
+void X86AsmPrinter::EmitTASECartridgeRecords() {
+  auto records = OutContext.getAllCartridgeRecords();
+  if (records->empty()) {
+    return;
+  }
+  MCSection *Cur = OutStreamer->getCurrentSectionOnly();
+  OutStreamer->SwitchSection(
+      OutContext.getELFSection(".rodata.tase_records", ELF::SHT_PROGBITS, 0));
+
+  OutStreamer->AddComment("Start of TASE Cartridge records");
+  OutStreamer->AddBlankLine();
+
+  for (MCCartridgeRecord *record : *records) {
+    OutStreamer->EmitSymbolValue(record->Cartridge(), 4);
+    OutStreamer->emitAbsoluteSymbolDiff(record->Body(), record->Cartridge(), 2);
+    OutStreamer->emitAbsoluteSymbolDiff(record->End(), record->Body(), 2);
+    OutStreamer->AddBlankLine();
+  }
+
+  OutStreamer->AddComment("End of TASE Cartridge records");
+  OutStreamer->AddBlankLine();
+
+  OutStreamer->SwitchSection(Cur);
 }
 
 //===----------------------------------------------------------------------===//

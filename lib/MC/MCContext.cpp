@@ -17,6 +17,7 @@
 #include "llvm/BinaryFormat/COFF.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCCartridgeRecord.h"
 #include "llvm/MC/MCCodeView.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCExpr.h"
@@ -58,7 +59,7 @@ MCContext::MCContext(const MCAsmInfo *mai, const MCRegisterInfo *mri,
                      const MCObjectFileInfo *mofi, const SourceMgr *mgr,
                      bool DoAutoReset)
     : SrcMgr(mgr), InlineSrcMgr(nullptr), MAI(mai), MRI(mri), MOFI(mofi),
-      Symbols(Allocator), UsedNames(Allocator),
+      Symbols(Allocator), CartridgeRecords(), UsedNames(Allocator),
       CurrentDwarfLoc(0, 0, 0, DWARF2_FLAG_IS_STMT, 0, 0),
       AutoReset(DoAutoReset) {
   SecureLogFile = AsSecureLogFileName;
@@ -87,6 +88,7 @@ void MCContext::reset() {
   MachOAllocator.DestroyAll();
 
   MCSubtargetAllocator.DestroyAll();
+  CartridgeRecords.clear();
   UsedNames.clear();
   Symbols.clear();
   Allocator.Reset();
@@ -131,6 +133,16 @@ MCSymbol *MCContext::getOrCreateSymbol(const Twine &Name) {
     Sym = createSymbol(NameRef, false, false);
 
   return Sym;
+}
+
+MCCartridgeRecord *MCContext::createCartridgeRecord(MCSymbol *cartridge) {
+  MCCartridgeRecord *record = new (*this) MCCartridgeRecord(cartridge, this);
+  CartridgeRecords.push_back(record);
+  return record;
+}
+
+const std::vector<MCCartridgeRecord *> *MCContext::getAllCartridgeRecords() const {
+  return &CartridgeRecords;
 }
 
 MCSymbol *MCContext::getOrCreateFrameAllocSymbol(StringRef FuncName,

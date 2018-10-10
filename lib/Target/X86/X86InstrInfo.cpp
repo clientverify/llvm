@@ -5029,10 +5029,18 @@ X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr &MI,
     unsigned RCSize = 0;
     switch (MI.getOpcode()) {
     default: return nullptr;
+    // Nothing to fold here.  We know we don't allowe CMP*r* to be folded.
+    // Hence we simply abort early.
+    // We need to force this - otherwise the instruction gets modified
+    // without a fold succeeding and the inline spiller gets very very
+    // confused when it tries to spill *both* operands of a newly re-written
+    // register-immediate instruction and blows up.
+    /*
     case X86::TEST8rr:  NewOpc = X86::CMP8ri; RCSize = 1; break;
     case X86::TEST16rr: NewOpc = X86::CMP16ri8; RCSize = 2; break;
     case X86::TEST32rr: NewOpc = X86::CMP32ri8; RCSize = 4; break;
     case X86::TEST64rr: NewOpc = X86::CMP64ri8; RCSize = 8; break;
+    */
     }
     // Check if it's safe to fold the load. If the size of the object is
     // narrower than the load width, then it's not.

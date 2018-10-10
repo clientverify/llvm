@@ -103,6 +103,8 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   // Choose between emitting .seh_ directives and .cv_fpo_ directives.
   void EmitSEHInstruction(const MachineInstr *MI);
 
+  void EmitTASECartridgeRecords();
+
 public:
   X86AsmPrinter(TargetMachine &TM, std::unique_ptr<MCStreamer> Streamer);
 

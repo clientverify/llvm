@@ -382,7 +382,7 @@ def SSP : X86Reg<"ssp", 0>;
 // cannot be encoded.
 def GR8 : RegisterClass<"X86", [i8],  8,
                         (add AL, CL, DL, AH, CH, DH, BL, BH, SIL, DIL, BPL, SPL,
-                             R8B, R9B, R10B, R11B, R14B, R15B, R12B, R13B)> {
+                             R8B, R9B, R10B, R11B, R12B, R13B, R14B, R15B)> {
   let AltOrders = [(sub GR8, AH, BH, CH, DH)];
   let AltOrderSelect = [{
     return MF.getSubtarget<X86Subtarget>().is64Bit();
@@ -396,7 +396,7 @@ def GRH8 : RegisterClass<"X86", [i8],  8,
 
 def GR16 : RegisterClass<"X86", [i16], 16,
                          (add AX, CX, DX, SI, DI, BX, BP, SP,
-                              R8W, R9W, R10W, R11W, R14W, R15W, R12W, R13W)>;
+                              R8W, R9W, R10W, R11W, R12W, R13W, R14W, R15W)>;
 
 let isAllocatable = 0 in
 def GRH16 : RegisterClass<"X86", [i16], 16,
@@ -406,7 +406,7 @@ def GRH16 : RegisterClass<"X86", [i16], 16,
 
 def GR32 : RegisterClass<"X86", [i32], 32,
                          (add EAX, ECX, EDX, ESI, EDI, EBX, EBP, ESP,
-                              R8D, R9D, R10D, R11D, R14D, R15D, R12D, R13D)>;
+                              R8D, R9D, R10D, R11D, R12D, R13D, R14D, R15D)>;
 
 // GR64 - 64-bit GPRs. This oddly includes RIP, which isn't accurate, since
 // RIP isn't really a register and it can't be used anywhere except in an
@@ -415,7 +415,7 @@ def GR32 : RegisterClass<"X86", [i32], 32,
 // tests because of the inclusion of RIP in this register class.
 def GR64 : RegisterClass<"X86", [i64], 64,
                          (add RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11,
-                              RBX, R14, R15, R12, R13, RBP, RSP, RIP)>;
+                              RBX, R12, R13, RBP, RSP, RIP, R14, R15)>;
 
 // Segment registers for use by MOV instructions (and others) that have a
 //   segment register as one operand.  Always contain a 16-bit segment

@@ -42,6 +42,7 @@ namespace llvm {
 
   class CodeViewContext;
   class MCAsmInfo;
+  class MCCartridgeRecord;
   class MCLabel;
   class MCObjectFileInfo;
   class MCRegisterInfo;
@@ -95,6 +96,10 @@ namespace llvm {
 
     /// Bindings of names to symbols.
     SymbolTable Symbols;
+
+    /// TASE: A list of catridge record labels.  The emitter can use these to emit the actual
+    /// record table and calculate relative displacements of records.
+    std::vector<MCCartridgeRecord *> CartridgeRecords;
 
     /// A mapping from a local label number and an instance count to a symbol.
     /// For example, in the assembly
@@ -337,6 +342,13 @@ namespace llvm {
     ///
     /// \param Name - The symbol name, which must be unique across all symbols.
     MCSymbol *getOrCreateSymbol(const Twine &Name);
+
+    /// Create the symbols for a new cartridge. You will need to actually emit the
+    /// symbols at the right place.
+    MCCartridgeRecord *createCartridgeRecord(MCSymbol *cartridge);
+
+    /// All cartridge records accumulated so far.
+    const std::vector<MCCartridgeRecord *> *getAllCartridgeRecords() const;
 
     /// Gets a symbol that will be defined to the final stack offset of a local
     /// variable after codegen.

@@ -69,9 +69,16 @@ set(sources
   X86VZeroUpper.cpp
   X86WinAllocaExpander.cpp
   X86WinEHState.cpp
+  X86TASE.cpp
+  X86TASEDecorateCartridge.cpp
+  X86TASEAddCartridgeSpringboard.cpp
+  X86TASECaptureTaint.cpp
   )
 
 add_llvm_target(X86CodeGen ${sources})
+
+# It's janky but *shrug* lets use our common definitions from TASE.
+include_directories(${LLVM_MAIN_SRC_DIR}/../test/tase/include)
 
 add_subdirectory(AsmParser)
 add_subdirectory(Disassembler)

@@ -392,6 +392,8 @@ CodeGenInstruction::CodeGenInstruction(Record *R)
   hasChain = false;
   hasChain_Inferred = false;
 
+  isAllowedMemInstr = R->getValueAsBit("isAllowedMemInstr");
+
   // Parse Constraints.
   ParseConstraints(R->getValueAsString("Constraints"), Operands, R);
 

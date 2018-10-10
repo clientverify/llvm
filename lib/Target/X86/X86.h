@@ -135,6 +135,10 @@ InstructionSelector *createX86InstructionSelector(const X86TargetMachine &TM,
 
 FunctionPass *createX86SpeculativeLoadHardeningPass();
 
+FunctionPass *createX86TASEDecorateCartridge();
+FunctionPass *createX86TASECaptureTaint();
+FunctionPass *createX86TASEAddCartridgeSpringboard();
+
 void initializeEvexToVexInstPassPass(PassRegistry &);
 void initializeFixupBWInstPassPass(PassRegistry &);
 void initializeFixupLEAPassPass(PassRegistry &);
@@ -148,6 +152,9 @@ void initializeX86DomainReassignmentPass(PassRegistry &);
 void initializeX86ExecutionDomainFixPass(PassRegistry &);
 void initializeX86FlagsCopyLoweringPassPass(PassRegistry &);
 void initializeX86SpeculativeLoadHardeningPassPass(PassRegistry &);
+void initializeX86TASEDecorateCartridgePassPass(PassRegistry &);
+void initializeX86TASECaptureTaintPassPass(PassRegistry &);
+void initializeX86TASEAddCartridgeSpringboardPassPass(PassRegistry &);
 
 } // End llvm namespace
 

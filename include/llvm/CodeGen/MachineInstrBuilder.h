@@ -58,6 +58,46 @@ namespace RegState {
 
 } // end namespace RegState
 
+inline unsigned getDefRegState(bool B) {
+  return B ? RegState::Define : 0;
+}
+inline unsigned getImplRegState(bool B) {
+  return B ? RegState::Implicit : 0;
+}
+inline unsigned getKillRegState(bool B) {
+  return B ? RegState::Kill : 0;
+}
+inline unsigned getDeadRegState(bool B) {
+  return B ? RegState::Dead : 0;
+}
+inline unsigned getUndefRegState(bool B) {
+  return B ? RegState::Undef : 0;
+}
+inline unsigned getInternalReadRegState(bool B) {
+  return B ? RegState::InternalRead : 0;
+}
+inline unsigned getDebugRegState(bool B) {
+  return B ? RegState::Debug : 0;
+}
+inline unsigned getRenamableRegState(bool B) {
+  return B ? RegState::Renamable : 0;
+}
+
+/// Get all register state flags from machine operand \p RegOp.
+inline unsigned getRegState(const MachineOperand &RegOp) {
+  assert(RegOp.isReg() && "Not a register operand");
+  return getDefRegState(RegOp.isDef())                    |
+         getImplRegState(RegOp.isImplicit())              |
+         getKillRegState(RegOp.isKill())                  |
+         getDeadRegState(RegOp.isDead())                  |
+         getUndefRegState(RegOp.isUndef())                |
+         getInternalReadRegState(RegOp.isInternalRead())  |
+         getDebugRegState(RegOp.isDebug())                |
+         getRenamableRegState(
+             TargetRegisterInfo::isPhysicalRegister(RegOp.getReg()) &&
+             RegOp.isRenamable());
+}
+
 class MachineInstrBuilder {
   MachineFunction *MF = nullptr;
   MachineInstr *MI = nullptr;
@@ -211,6 +251,14 @@ public:
   const MachineInstrBuilder &add(const MachineOperand &MO) const {
     MI->addOperand(*MF, MO);
     return *this;
+  }
+
+  const MachineInstrBuilder &addAndUse(const MachineOperand &MO) const {
+    if (MO.isReg()) {
+      return addUse(MO.getReg(), getRegState(MO) & ~RegState::Kill);
+    } else {
+      return add(MO);
+    }
   }
 
   const MachineInstrBuilder &add(ArrayRef<MachineOperand> MOs) const {
@@ -454,46 +502,6 @@ MachineInstr *buildDbgValueForSpill(MachineBasicBlock &BB,
 /// Update a DBG_VALUE whose value has been spilled to FrameIndex. Useful when
 /// modifying an instruction in place while iterating over a basic block.
 void updateDbgValueForSpill(MachineInstr &Orig, int FrameIndex);
-
-inline unsigned getDefRegState(bool B) {
-  return B ? RegState::Define : 0;
-}
-inline unsigned getImplRegState(bool B) {
-  return B ? RegState::Implicit : 0;
-}
-inline unsigned getKillRegState(bool B) {
-  return B ? RegState::Kill : 0;
-}
-inline unsigned getDeadRegState(bool B) {
-  return B ? RegState::Dead : 0;
-}
-inline unsigned getUndefRegState(bool B) {
-  return B ? RegState::Undef : 0;
-}
-inline unsigned getInternalReadRegState(bool B) {
-  return B ? RegState::InternalRead : 0;
-}
-inline unsigned getDebugRegState(bool B) {
-  return B ? RegState::Debug : 0;
-}
-inline unsigned getRenamableRegState(bool B) {
-  return B ? RegState::Renamable : 0;
-}
-
-/// Get all register state flags from machine operand \p RegOp.
-inline unsigned getRegState(const MachineOperand &RegOp) {
-  assert(RegOp.isReg() && "Not a register operand");
-  return getDefRegState(RegOp.isDef())                    |
-         getImplRegState(RegOp.isImplicit())              |
-         getKillRegState(RegOp.isKill())                  |
-         getDeadRegState(RegOp.isDead())                  |
-         getUndefRegState(RegOp.isUndef())                |
-         getInternalReadRegState(RegOp.isInternalRead())  |
-         getDebugRegState(RegOp.isDebug())                |
-         getRenamableRegState(
-             TargetRegisterInfo::isPhysicalRegister(RegOp.getReg()) &&
-             RegOp.isRenamable());
-}
 
 /// Helper class for constructing bundles of MachineInstrs.
 ///

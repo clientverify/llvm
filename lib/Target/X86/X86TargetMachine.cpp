@@ -80,6 +80,9 @@ extern "C" void LLVMInitializeX86Target() {
   initializeX86SpeculativeLoadHardeningPassPass(PR);
   initializeX86FlagsCopyLoweringPassPass(PR);
   initializeX86CondBrFoldingPassPass(PR);
+  initializeX86TASEDecorateCartridgePassPass(PR);
+  initializeX86TASECaptureTaintPassPass(PR);
+  initializeX86TASEAddCartridgeSpringboardPassPass(PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -518,4 +521,8 @@ void X86PassConfig::addPreEmitPass2() {
       (!TT.isOSWindows() ||
        MAI->getExceptionHandlingType() == ExceptionHandling::DwarfCFI))
     addPass(createCFIInstrInserter());
+
+  addPass(createX86TASEDecorateCartridge());
+  addPass(createX86TASECaptureTaint());
+  addPass(createX86TASEAddCartridgeSpringboard());
 }
