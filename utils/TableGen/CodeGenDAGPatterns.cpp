@@ -3727,7 +3727,7 @@ static void FindNames(TreePatternNode *P,
   }
 }
 
-std::vector<Predicate> CodeGenDAGPatterns::makePredList(ListInit *L) {
+std::vector<Predicate> CodeGenDAGPatterns::makePredList(ListInit *L, TreePatternNodePtr T) {
   std::vector<Predicate> Preds;
   for (Init *I : L->getValues()) {
     if (DefInit *Pred = dyn_cast<DefInit>(I))
@@ -3735,6 +3735,13 @@ std::vector<Predicate> CodeGenDAGPatterns::makePredList(ListInit *L) {
     else
       llvm_unreachable("Non-def on the list");
   }
+
+  /* CodeGenInstruction &II = Target.getInstruction(T->getOperator());
+  if (II.mayLoad || II.mayStore) {
+    Record* pred = Records.getDef("UseComplexMemInstrs");
+    assert((pred != nullptr) && "No complex memory instruction top-level predicate defined");
+    Preds.push_back(pred);
+  }*/
 
   // Sort so that different orders get canonicalized to the same string.
   llvm::sort(Preds.begin(), Preds.end());
@@ -3828,25 +3835,46 @@ void CodeGenDAGPatterns::InferInstructionFlags() {
       if (InstInfo->hasSideEffects_Unset)
         InstInfo->hasSideEffects = true;
     }
-    return;
+  } else {
+    // Complain about any flags that are still undefined.
+    for (unsigned i = 0, e = Instructions.size(); i != e; ++i) {
+      CodeGenInstruction *InstInfo =
+        const_cast<CodeGenInstruction *>(Instructions[i]);
+
+      if (InstInfo->InferredFrom)
+        continue;
+      if (InstInfo->hasSideEffects_Unset)
+        PrintError(InstInfo->TheDef->getLoc(),
+                  "Can't infer hasSideEffects from patterns");
+      if (InstInfo->mayStore_Unset)
+        PrintError(InstInfo->TheDef->getLoc(),
+                  "Can't infer mayStore from patterns");
+      if (InstInfo->mayLoad_Unset)
+        PrintError(InstInfo->TheDef->getLoc(),
+                  "Can't infer mayLoad from patterns");
+    }
   }
 
-  // Complain about any flags that are still undefined.
-  for (unsigned i = 0, e = Instructions.size(); i != e; ++i) {
-    CodeGenInstruction *InstInfo =
-      const_cast<CodeGenInstruction *>(Instructions[i]);
-    if (InstInfo->InferredFrom)
-      continue;
-    if (InstInfo->hasSideEffects_Unset)
-      PrintError(InstInfo->TheDef->getLoc(),
-                 "Can't infer hasSideEffects from patterns");
-    if (InstInfo->mayStore_Unset)
-      PrintError(InstInfo->TheDef->getLoc(),
-                 "Can't infer mayStore from patterns");
-    if (InstInfo->mayLoad_Unset)
-      PrintError(InstInfo->TheDef->getLoc(),
-                 "Can't infer mayLoad from patterns");
+  Record* pred = Records.getDef("UseComplexMemInstrs");
+  assert((pred != nullptr) && "No complex memory instruction top-level predicate defined");
+  int numInstrs = 0;
+
+  for (PatternToMatch &PTM : PatternsToMatch) {
+    SmallVector<Record*, 8> PatInstrs;
+    getInstructionsInTree(PTM.getDstPattern(), PatInstrs);
+
+    for (Record *PI : PatInstrs) {
+      CodeGenInstruction &InstInfo = Target.getInstruction(PI);
+
+      PI->dump();
+      if (InstInfo.mayLoad || InstInfo.mayStore) {
+        PTM.Predicates.emplace_back(pred);
+        numInstrs++;
+      }
+    }
   }
+
+  assert((numInstrs > 0) && "We didn't find any instructions");
 }
 
 
@@ -4052,7 +4080,7 @@ void CodeGenDAGPatterns::ParseOnePattern(Record *TheDef,
     for (auto T : Pattern.getTrees())
       if (T->hasPossibleType())
         AddPatternToMatch(&Pattern,
-                          PatternToMatch(TheDef, makePredList(Preds),
+                          PatternToMatch(TheDef, makePredList(Preds, T),
                                          T, Temp.getOnlyTree(),
                                          InstImpResults, Complexity,
                                          TheDef->getID()));

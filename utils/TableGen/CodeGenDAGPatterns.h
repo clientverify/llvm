@@ -1209,7 +1209,7 @@ private:
   void GenerateVariants();
   void VerifyInstructionFlags();
 
-  std::vector<Predicate> makePredList(ListInit *L);
+  std::vector<Predicate> makePredList(ListInit *L, TreePatternNodePtr T);
 
   void ParseOnePattern(Record *TheDef,
                        TreePattern &Pattern, TreePattern &Result,
