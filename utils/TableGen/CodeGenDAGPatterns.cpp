@@ -3865,15 +3865,19 @@ void CodeGenDAGPatterns::InferInstructionFlags() {
 
     for (Record *PI : PatInstrs) {
       CodeGenInstruction &InstInfo = Target.getInstruction(PI);
+      // Allow special instructions (MOV, PUSH, POP, PUSHF, POPF, CALL, RET) to touch memory.
+      if (InstInfo.isAllowedMemInstr) continue;
+      // If there is no mechanism to emit this instruction, we don't need to disable it.
+      // It might get optimized out.
+      if (InstInfo.isPseudo) continue;
+      if (!InstInfo.mayLoad && !InstInfo.mayStore) continue;
 
-      PI->dump();
-      if (InstInfo.mayLoad || InstInfo.mayStore) {
-        PTM.Predicates.emplace_back(pred);
-        numInstrs++;
-      }
+      PTM.Predicates.emplace_back(pred);
+      numInstrs++;
     }
   }
 
+  LLVM_DEBUG(errs() << "Disabled patterns for " << numInstrs << " complex memory instructions\n");
   assert((numInstrs > 0) && "We didn't find any instructions");
 }
 

@@ -502,6 +502,10 @@ class Instruction {
   //   assembler match tables.
   bit isCodeGenOnly = 0;
 
+  // TASE: Is this an instruction allowed to access memory?
+  // This only applies if the instruction is not a pseudo instruction.
+  bit isAllowedMemInstr = 0;
+
   // Is this instruction a pseudo instruction for use by the assembler parser.
   bit isAsmParserOnly = 0;
 
