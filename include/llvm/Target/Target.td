@@ -625,6 +625,9 @@ class Predicate<string cond> {
   bit RecomputePerFunction = 0;
 }
 
+class TrueBasePredicate : Predicate<"true">;
+class FalseBasePredicate : Predicate<"false">;
+
 /// NoHonorSignDependentRounding - This predicate is true if support for
 /// sign-dependent-rounding is not enabled.
 def NoHonorSignDependentRounding

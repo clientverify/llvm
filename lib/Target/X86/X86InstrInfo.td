@@ -800,8 +800,9 @@ def relocImm : ComplexPattern<iAny, 1, "selectRelocImm", [imm, X86Wrapper], [],
 
 //===----------------------------------------------------------------------===//
 // X86 Instruction Predicate Definitions.
-def TruePredicate : Predicate<"true">;
-def UseComplexMemInstrs : Predicate<"false">;
+def TruePredicate : TrueBasePredicate;
+def FalsePredicate : FalseBasePredicate;
+def UseComplexMemInstrs : FalseBasePredicate;
 
 def HasCMov      : Predicate<"Subtarget->hasCMov()">;
 def NoCMov       : Predicate<"!Subtarget->hasCMov()">;
@@ -1235,22 +1236,17 @@ let Defs = [ESP], Uses = [ESP], hasSideEffects=0 in {
                       OpSize32, Requires<[Not64BitMode]>, NotMemoryFoldable;
     } // isCodeGenOnly = 1, ForceDisassemble = 1
 
-    // TASE TODO: Do we want to allow immediate pushes?  We should be able
-    // to completely ignore them w.r.t. poison instrumentation right?
-    // Unless they get popped into EFLAGS?  Investigate this.
-    let isAllowedMemInstr = 1 in {
-      def PUSH16i8 : Ii8<0x6a, RawFrm, (outs), (ins i16i8imm:$imm),
-                        "push{w}\t$imm", []>, OpSize16;
-      def PUSHi16  : Ii16<0x68, RawFrm, (outs), (ins i16imm:$imm),
-                        "push{w}\t$imm", []>, OpSize16;
+    def PUSH16i8 : Ii8<0x6a, RawFrm, (outs), (ins i16i8imm:$imm),
+                      "push{w}\t$imm", []>, OpSize16;
+    def PUSHi16  : Ii16<0x68, RawFrm, (outs), (ins i16imm:$imm),
+                      "push{w}\t$imm", []>, OpSize16;
 
-      def PUSH32i8 : Ii8<0x6a, RawFrm, (outs), (ins i32i8imm:$imm),
-                        "push{l}\t$imm", []>, OpSize32,
-                        Requires<[Not64BitMode]>;
-      def PUSHi32  : Ii32<0x68, RawFrm, (outs), (ins i32imm:$imm),
-                        "push{l}\t$imm", []>, OpSize32,
-                        Requires<[Not64BitMode]>;
-    }
+    def PUSH32i8 : Ii8<0x6a, RawFrm, (outs), (ins i32i8imm:$imm),
+                      "push{l}\t$imm", []>, OpSize32,
+                      Requires<[Not64BitMode]>;
+    def PUSHi32  : Ii32<0x68, RawFrm, (outs), (ins i32imm:$imm),
+                      "push{l}\t$imm", []>, OpSize32,
+                      Requires<[Not64BitMode]>;
   } // mayStore, SchedRW
 
   let mayLoad = 1, mayStore = 1, SchedRW = [WriteRMW] in {
@@ -1544,23 +1540,20 @@ def MOV32ri_alt : Ii32<0xC7, MRM0r, (outs GR32:$dst), (ins i32imm:$src),
 }
 } // SchedRW
 
-// TASE TODO: Again, check if we call allow these moves for free.
 let SchedRW = [WriteStore] in {
   def MOV8mi  : Ii8 <0xC6, MRM0m, (outs), (ins i8mem :$dst, i8imm :$src),
                     "mov{b}\t{$src, $dst|$dst, $src}",
                     [(store (i8 imm8_su:$src), addr:$dst)]>;
-  let isAllowedMemInstr = 1 in {
-    def MOV16mi : Ii16<0xC7, MRM0m, (outs), (ins i16mem:$dst, i16imm:$src),
-                      "mov{w}\t{$src, $dst|$dst, $src}",
-                      [(store (i16 imm16_su:$src), addr:$dst)]>, OpSize16;
-    def MOV32mi : Ii32<0xC7, MRM0m, (outs), (ins i32mem:$dst, i32imm:$src),
-                      "mov{l}\t{$src, $dst|$dst, $src}",
-                      [(store (i32 imm32_su:$src), addr:$dst)]>, OpSize32;
-    def MOV64mi32 : RIi32S<0xC7, MRM0m, (outs), (ins i64mem:$dst, i64i32imm:$src),
-                          "mov{q}\t{$src, $dst|$dst, $src}",
-                          [(store i64immSExt32_su:$src, addr:$dst)]>,
-                          Requires<[In64BitMode]>;
-  }
+  def MOV16mi : Ii16<0xC7, MRM0m, (outs), (ins i16mem:$dst, i16imm:$src),
+                    "mov{w}\t{$src, $dst|$dst, $src}",
+                    [(store (i16 imm16_su:$src), addr:$dst)]>, OpSize16;
+  def MOV32mi : Ii32<0xC7, MRM0m, (outs), (ins i32mem:$dst, i32imm:$src),
+                    "mov{l}\t{$src, $dst|$dst, $src}",
+                    [(store (i32 imm32_su:$src), addr:$dst)]>, OpSize32;
+  def MOV64mi32 : RIi32S<0xC7, MRM0m, (outs), (ins i64mem:$dst, i64i32imm:$src),
+                        "mov{q}\t{$src, $dst|$dst, $src}",
+                        [(store i64immSExt32_su:$src, addr:$dst)]>,
+                        Requires<[In64BitMode]>;
 } // SchedRW
 
 let hasSideEffects = 0 in {

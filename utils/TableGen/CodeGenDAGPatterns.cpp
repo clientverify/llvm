@@ -3857,6 +3857,13 @@ void CodeGenDAGPatterns::InferInstructionFlags() {
 
   Record* pred = Records.getDef("UseComplexMemInstrs");
   assert((pred != nullptr) && "No complex memory instruction top-level predicate defined");
+
+  if (pred->isSubClassOf("TrueBasePredicate")) {
+    // We are allowed to use all instructions.  We are done!
+    return;
+  }
+
+  bool isFalsePred = pred->isSubClassOf("FalseBasePredicate");
   int numInstrs = 0;
 
   for (PatternToMatch &PTM : PatternsToMatch) {
@@ -3872,6 +3879,13 @@ void CodeGenDAGPatterns::InferInstructionFlags() {
       if (InstInfo.isPseudo) continue;
       if (!InstInfo.mayLoad && !InstInfo.mayStore) continue;
 
+      // TASE TODO: Maybe we don't even need to emit the instruction pattern itself.
+      // But worry about that later.
+      if (isFalsePred) {
+        // This is to prevent tblgen from duplicating a lot of predicates with (something) && (false)
+        // There is a limit of 256 predicates due to some part of the code using a char/uint8_t.
+        PTM.Predicates.clear();
+      }
       PTM.Predicates.emplace_back(pred);
       numInstrs++;
     }
