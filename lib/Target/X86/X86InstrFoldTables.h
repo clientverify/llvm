@@ -48,8 +48,20 @@ enum {
   TB_ALIGN_16    =   16 << TB_ALIGN_SHIFT,
   TB_ALIGN_32    =   32 << TB_ALIGN_SHIFT,
   TB_ALIGN_64    =   64 << TB_ALIGN_SHIFT,
-  TB_ALIGN_MASK  = 0xff << TB_ALIGN_SHIFT
+  TB_ALIGN_MASK  = 0x7f << TB_ALIGN_SHIFT,
+
+  // Yes this looks weird.  We steal the top bit in flags to mark instructions
+  // that prefer to be folded even when in RISC mode.  Primarily, these
+  // would be a few MOV instructions.  The default when RISC mode is enabled
+  // is to assume you can't fold in the forward direction unless explicitly
+  // told otherwise.
+  TB_MUST_FORWARD = 1 << 15,
+  // Used to actually mark the RISC MOV instructions - we don't allow
+  // folding if reading at a granularity below the width of the poison
+  // value.
+  TB_MUST_FORWARD_ENTRY = TB_MUST_FORWARD | TB_ALIGN_16,
 };
+
 
 // This struct is used for both the folding and unfold tables. They KeyOp
 // is used to determine the sorting order.

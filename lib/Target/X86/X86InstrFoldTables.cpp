@@ -292,11 +292,11 @@ static const X86MemoryFoldTableEntry MemoryFoldTable0[] = {
   { X86::JMP64r,              X86::JMP64m,              TB_FOLDED_LOAD },
   { X86::JMP64r_NT,           X86::JMP64m_NT,           TB_FOLDED_LOAD },
   { X86::MOV16ri,             X86::MOV16mi,             TB_FOLDED_STORE },
-  { X86::MOV16rr,             X86::MOV16mr,             TB_FOLDED_STORE },
+  { X86::MOV16rr,             X86::MOV16mr,             TB_FOLDED_STORE | TB_MUST_FORWARD_ENTRY },
   { X86::MOV32ri,             X86::MOV32mi,             TB_FOLDED_STORE },
-  { X86::MOV32rr,             X86::MOV32mr,             TB_FOLDED_STORE },
+  { X86::MOV32rr,             X86::MOV32mr,             TB_FOLDED_STORE | TB_MUST_FORWARD_ENTRY },
   { X86::MOV64ri32,           X86::MOV64mi32,           TB_FOLDED_STORE },
-  { X86::MOV64rr,             X86::MOV64mr,             TB_FOLDED_STORE },
+  { X86::MOV64rr,             X86::MOV64mr,             TB_FOLDED_STORE | TB_MUST_FORWARD_ENTRY },
   { X86::MOV8ri,              X86::MOV8mi,              TB_FOLDED_STORE },
   { X86::MOV8rr,              X86::MOV8mr,              TB_FOLDED_STORE },
   { X86::MOV8rr_NOREX,        X86::MOV8mr_NOREX,        TB_FOLDED_STORE },
@@ -541,9 +541,9 @@ static const X86MemoryFoldTableEntry MemoryFoldTable1[] = {
   { X86::MMX_PABSDrr,          X86::MMX_PABSDrm,          0 },
   { X86::MMX_PABSWrr,          X86::MMX_PABSWrm,          0 },
   { X86::MMX_PSHUFWri,         X86::MMX_PSHUFWmi,         0 },
-  { X86::MOV16rr,              X86::MOV16rm,              0 },
-  { X86::MOV32rr,              X86::MOV32rm,              0 },
-  { X86::MOV64rr,              X86::MOV64rm,              0 },
+  { X86::MOV16rr,              X86::MOV16rm,              TB_MUST_FORWARD_ENTRY },
+  { X86::MOV32rr,              X86::MOV32rm,              TB_MUST_FORWARD_ENTRY },
+  { X86::MOV64rr,              X86::MOV64rm,              TB_MUST_FORWARD_ENTRY },
   { X86::MOV64toPQIrr,         X86::MOVQI2PQIrm,          0 },
   { X86::MOV64toSDrr,          X86::MOV64toSDrm,          0 },
   { X86::MOV8rr,               X86::MOV8rm,               0 },
@@ -5318,10 +5318,16 @@ lookupFoldTableImpl(ArrayRef<X86MemoryFoldTableEntry> Table, unsigned RegOp) {
   const X86MemoryFoldTableEntry *Data = std::lower_bound(Table.begin(),
                                                          Table.end(),
                                                          RegOp);
-  if (Data != Table.end() && Data->KeyOp == RegOp &&
-      !(Data->Flags & TB_NO_FORWARD))
-    return Data;
-  return nullptr;
+  if (Data == Table.end() || Data->KeyOp != RegOp)
+    return nullptr;
+  // General case - don't ever forward if you're told not to.
+  if (Data->Flags & TB_NO_FORWARD)
+    return nullptr;
+  // TASE TODO: Check if RISC mode is actually enabled using the predicate
+  // in the X86 subtarget.
+  if (!(Data->Flags & TB_MUST_FORWARD))
+    return nullptr;
+  return Data;
 }
 
 const X86MemoryFoldTableEntry *
