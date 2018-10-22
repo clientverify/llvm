@@ -1504,7 +1504,12 @@ void X86AsmPrinter::EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL
 
   if (!MI->memoperands_empty()) {
     regSize = (*MI->memoperands_begin())->getSize();
+    if (regSize > 8) {
+      errs() << "TASE: Found large size register (possibly SSE) \n";
+      return;
+    }
     offset = getOffsetForSize(regSize);
+    
     if (!regSize) {
       errs() << "TASE: Instruction has zero-size memory operand:  " << *MI;
       errs() << "  -> operand is:  " << *(*MI->memoperands_begin());
@@ -1527,20 +1532,40 @@ void X86AsmPrinter::EmitPoisonCheck(const MachineInstr *MI, X86MCInstLower &MCIL
     // the size of memory that was read from/written to to compute the taint size.
     unsigned newReg = MI->getOperand(0).getReg();
     unsigned newSize = getPhysRegSize(newReg);
-    unsigned newOffset = getOffsetForSize(newSize);
 
+    //ABH & Kartik added 10/19 for implicit loads of mov32rm into eax.
+    if (!newSize) {
+      switch (MI->getOpcode()) {
+      case (X86::MOV32rm):
+	newSize =4;
+	newReg = X86::EAX;
+	break;
+      default:
+	newSize = 0;
+      } 
+    }
+
+    unsigned newOffset = getOffsetForSize(newSize);
+    
+    
     // If regSize is unavailable due to implicit operands (pop for example),
     // assign it here.
-    if (!regSize) {
+    if (regSize <= 1) {
       regSize = newSize;
       offset = newOffset;
     }
 
+    if (regSize <= 1) {
+      errs() << "ERROR  in fast path with regSize \n";
+      MI->dump();
+    }
+    
+    
     assert(regSize > 0 && "TASE: We should have some size information to poison check an instruction");
     assert(regSize > 1 && "TASE: We should not be in the fast path unless we have at-least 2 bytes");
     EmitAndCountInstruction(MCInstBuilder(MOVrr[newOffset])
-      .addReg(R15_SIZED[newOffset])
-      .addReg(newReg));
+			    .addReg(R15_SIZED[newOffset])
+			    .addReg(newReg));
   } else {
     assert(regSize > 0 && "TASE: We should have some size information to poison check an instruction");
     // Slow case

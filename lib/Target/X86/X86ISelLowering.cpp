@@ -2035,12 +2035,15 @@ X86TargetLowering::LowerReturn(SDValue Chain,
 
     assert(VA.getLocInfo() != CCValAssign::FPExt &&
            "Unexpected FP-extend for return value.");
+    
 
     // If this is x86-64, and we disabled SSE, we can't return FP values,
     // or SSE or MMX vectors.
     if ((ValVT == MVT::f32 || ValVT == MVT::f64 ||
          VA.getLocReg() == X86::XMM0 || VA.getLocReg() == X86::XMM1) &&
           (Subtarget->is64Bit() && !Subtarget->hasSSE1())) {
+      
+      MF.dump();
       report_fatal_error("SSE register return with SSE disabled");
     }
     // Likewise we can't return F64 values with SSE1 only.  gcc does so, but
@@ -2195,6 +2198,8 @@ X86TargetLowering::LowerCallResult(SDValue Chain, SDValue InFlag,
     // If this is x86-64, and we disabled SSE, we can't return FP values
     if ((CopyVT == MVT::f32 || CopyVT == MVT::f64) &&
         ((Is64Bit || Ins[i].Flags.isInReg()) && !Subtarget->hasSSE1())) {
+      MachineFunction &MF = DAG.getMachineFunction();
+      MF.dump();
       report_fatal_error("SSE register return with SSE disabled");
     }
 
