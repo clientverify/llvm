@@ -51,6 +51,10 @@ X86SelectionDAGInfo::EmitTargetCodeForMemset(SelectionDAG &DAG, SDLoc dl,
                                              SDValue Size, unsigned Align,
                                              bool isVolatile,
                                          MachinePointerInfo DstPtrInfo) const {
+
+  //Todo:  Maybe expose this via an external flag for TASE
+  return SDValue();
+
   ConstantSDNode *ConstantSize = dyn_cast<ConstantSDNode>(Size);
   const X86Subtarget &Subtarget =
       DAG.getMachineFunction().getSubtarget<X86Subtarget>();
@@ -204,6 +208,10 @@ SDValue X86SelectionDAGInfo::EmitTargetCodeForMemcpy(
     MachinePointerInfo DstPtrInfo, MachinePointerInfo SrcPtrInfo) const {
   // This requires the copy size to be a constant, preferably
   // within a subtarget-specific limit.
+
+  //TASE: Todo -- expose this with an external flag
+  return SDValue();
+
   ConstantSDNode *ConstantSize = dyn_cast<ConstantSDNode>(Size);
   const X86Subtarget &Subtarget =
       DAG.getMachineFunction().getSubtarget<X86Subtarget>();
