@@ -105,8 +105,8 @@ unsigned getSwappedVPCMPImm(unsigned Imm);
 
 /// Get the VPCOM immediate if the opcodes are swapped.
 unsigned getSwappedVPCOMImm(unsigned Imm);
-
 } // namespace X86
+
 
 /// isGlobalStubReference - Return true if the specified TargetFlag operand is
 /// a reference to a stub for a global, not the global itself.

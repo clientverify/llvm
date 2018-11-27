@@ -1236,17 +1236,19 @@ let Defs = [ESP], Uses = [ESP], hasSideEffects=0 in {
                       OpSize32, Requires<[Not64BitMode]>, NotMemoryFoldable;
     } // isCodeGenOnly = 1, ForceDisassemble = 1
 
-    def PUSH16i8 : Ii8<0x6a, RawFrm, (outs), (ins i16i8imm:$imm),
-                      "push{w}\t$imm", []>, OpSize16;
-    def PUSHi16  : Ii16<0x68, RawFrm, (outs), (ins i16imm:$imm),
-                      "push{w}\t$imm", []>, OpSize16;
+    let isAllowedMemInstr = 1 in {
+      def PUSH16i8 : Ii8<0x6a, RawFrm, (outs), (ins i16i8imm:$imm),
+                        "push{w}\t$imm", []>, OpSize16;
+      def PUSHi16  : Ii16<0x68, RawFrm, (outs), (ins i16imm:$imm),
+                        "push{w}\t$imm", []>, OpSize16;
 
-    def PUSH32i8 : Ii8<0x6a, RawFrm, (outs), (ins i32i8imm:$imm),
-                      "push{l}\t$imm", []>, OpSize32,
-                      Requires<[Not64BitMode]>;
-    def PUSHi32  : Ii32<0x68, RawFrm, (outs), (ins i32imm:$imm),
-                      "push{l}\t$imm", []>, OpSize32,
-                      Requires<[Not64BitMode]>;
+      def PUSH32i8 : Ii8<0x6a, RawFrm, (outs), (ins i32i8imm:$imm),
+                        "push{l}\t$imm", []>, OpSize32,
+                        Requires<[Not64BitMode]>;
+      def PUSHi32  : Ii32<0x68, RawFrm, (outs), (ins i32imm:$imm),
+                        "push{l}\t$imm", []>, OpSize32,
+                        Requires<[Not64BitMode]>;
+    }
   } // mayStore, SchedRW
 
   let mayLoad = 1, mayStore = 1, SchedRW = [WriteRMW] in {
@@ -1540,7 +1542,7 @@ def MOV32ri_alt : Ii32<0xC7, MRM0r, (outs GR32:$dst), (ins i32imm:$src),
 }
 } // SchedRW
 
-let SchedRW = [WriteStore] in {
+let SchedRW = [WriteStore], isAllowedMemInstr = 1 in {
   def MOV8mi  : Ii8 <0xC6, MRM0m, (outs), (ins i8mem :$dst, i8imm :$src),
                     "mov{b}\t{$src, $dst|$dst, $src}",
                     [(store (i8 imm8_su:$src), addr:$dst)]>;
@@ -1698,10 +1700,10 @@ def : InstAlias<"mov.s\t{$src, $dst|$dst, $src}",
                 (MOV64rr_REV GR64:$dst, GR64:$src), 0, "att">;
 
 let canFoldAsLoad = 1, isReMaterializable = 1, SchedRW = [WriteLoad] in {
-  def MOV8rm  : I<0x8A, MRMSrcMem, (outs GR8 :$dst), (ins i8mem :$src),
-                  "mov{b}\t{$src, $dst|$dst, $src}",
-                  [(set GR8:$dst, (loadi8 addr:$src))]>;
   let isAllowedMemInstr = 1 in {
+    def MOV8rm  : I<0x8A, MRMSrcMem, (outs GR8 :$dst), (ins i8mem :$src),
+                    "mov{b}\t{$src, $dst|$dst, $src}",
+                    [(set GR8:$dst, (loadi8 addr:$src))]>;
     def MOV16rm : I<0x8B, MRMSrcMem, (outs GR16:$dst), (ins i16mem:$src),
                     "mov{w}\t{$src, $dst|$dst, $src}",
                     [(set GR16:$dst, (loadi16 addr:$src))]>, OpSize16;
@@ -1715,10 +1717,10 @@ let canFoldAsLoad = 1, isReMaterializable = 1, SchedRW = [WriteLoad] in {
 }
 
 let SchedRW = [WriteStore] in {
-  def MOV8mr  : I<0x88, MRMDestMem, (outs), (ins i8mem :$dst, GR8 :$src),
-                  "mov{b}\t{$src, $dst|$dst, $src}",
-                  [(store GR8:$src, addr:$dst)]>;
   let isAllowedMemInstr = 1 in {
+    def MOV8mr  : I<0x88, MRMDestMem, (outs), (ins i8mem :$dst, GR8 :$src),
+                    "mov{b}\t{$src, $dst|$dst, $src}",
+                    [(store GR8:$src, addr:$dst)]>;
     def MOV16mr : I<0x89, MRMDestMem, (outs), (ins i16mem:$dst, GR16:$src),
                     "mov{w}\t{$src, $dst|$dst, $src}",
                     [(store GR16:$src, addr:$dst)]>, OpSize16;
@@ -1740,17 +1742,19 @@ def MOV8rr_NOREX : I<0x88, MRMDestReg,
                      (outs GR8_NOREX:$dst), (ins GR8_NOREX:$src),
                      "mov{b}\t{$src, $dst|$dst, $src}", []>,
                    Sched<[WriteMove]>;
-let mayStore = 1, hasSideEffects = 0 in
-def MOV8mr_NOREX : I<0x88, MRMDestMem,
-                     (outs), (ins i8mem_NOREX:$dst, GR8_NOREX:$src),
-                     "mov{b}\t{$src, $dst|$dst, $src}", []>,
-                     Sched<[WriteStore]>;
-let mayLoad = 1, hasSideEffects = 0,
-    canFoldAsLoad = 1, isReMaterializable = 1 in
-def MOV8rm_NOREX : I<0x8A, MRMSrcMem,
-                     (outs GR8_NOREX:$dst), (ins i8mem_NOREX:$src),
-                     "mov{b}\t{$src, $dst|$dst, $src}", []>,
-                     Sched<[WriteLoad]>;
+  let isAllowedMemInstr = 1 in {
+    let mayStore = 1, hasSideEffects = 0 in
+    def MOV8mr_NOREX : I<0x88, MRMDestMem,
+                        (outs), (ins i8mem_NOREX:$dst, GR8_NOREX:$src),
+                        "mov{b}\t{$src, $dst|$dst, $src}", []>,
+                        Sched<[WriteStore]>;
+    let mayLoad = 1, hasSideEffects = 0,
+        canFoldAsLoad = 1, isReMaterializable = 1 in
+    def MOV8rm_NOREX : I<0x8A, MRMSrcMem,
+                        (outs GR8_NOREX:$dst), (ins i8mem_NOREX:$src),
+                        "mov{b}\t{$src, $dst|$dst, $src}", []>,
+                        Sched<[WriteLoad]>;
+  }
 }
 
 

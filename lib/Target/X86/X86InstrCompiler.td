@@ -25,6 +25,32 @@ def GetLo8XForm : SDNodeXForm<imm, [{
   return getI8Imm((uint8_t)N->getZExtValue(), SDLoc(N));
 }]>;
 
+//===----------------------------------------------------------------------===//
+// TASE Pseudo Instruction.
+
+// Markers for block-start. Every basic block in an instrumented
+// function will restart any open transaction (or at least visit the spring board).
+// Calls to known instrumented functions can proceed without any instrumentation
+// but effectively act as barriers to basic blocks; i.e. a call should close a
+// TASE basic block as far as batched IR emission is concerned.
+
+// XMM8, 9, 10, 11 are the sized accumulators.
+// XMM12 is the reference.
+// XMM13 is the overall accumulator.
+
+// TODO what the heck does hasSideEffects even do?
+let hasSideEffects = 1, isCodeGenOnly = 1, SchedRW = [WriteSystem],
+    Predicates = [In64BitMode, HasRTM] in
+  let Defs = [RAX, EFLAGS, R15, XMM8, XMM9, XMM10, XMM11, XMM13],
+      Uses = [XMM8, XMM9, XMM10, XMM11, XMM12, XMM13] {
+    def TASE_TRAN_REOPEN : PseudoI<(outs), (ins), []>;
+    // Delimit a new TASE block - but this block is *always* interpreted.
+    // because it may have unpredictable symbolic control flow transfer.
+    // i.e. the target itself might be unknown such as during an indirect
+    // jump or switch jump table.
+    def TASE_TRAN_INTERPRET : PseudoI<(outs), (ins), []>;
+  }
+}
 
 //===----------------------------------------------------------------------===//
 // Random Pseudo Instructions.
@@ -865,7 +891,7 @@ multiclass ATOMIC_LOAD_BINOP<bits<8> opc8, bits<8> opc, string mnemonic,
                     !strconcat(mnemonic, "{l}\t{$val, $ptr|$ptr, $val}"),
                     [(set
                        GR32:$dst,
-                       (!cast<PatFrag>(frag # "_32") addr:$ptr, GR32:$val))]>, 
+                       (!cast<PatFrag>(frag # "_32") addr:$ptr, GR32:$val))]>,
                     OpSize32;
     def NAME#64 : RI<opc, MRMSrcMem, (outs GR64:$dst),
                      (ins GR64:$val, i64mem:$ptr),

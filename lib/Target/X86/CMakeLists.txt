@@ -1,5 +1,8 @@
 set(LLVM_TARGET_DEFINITIONS X86.td)
 
+# It's janky but *shrug* lets use our common definitions from TASE.
+include_directories($(LLVM_MAIN_SRC_DIR)/../test/tase/include)
+
 tablegen(LLVM X86GenAsmMatcher.inc -gen-asm-matcher)
 tablegen(LLVM X86GenAsmWriter.inc -gen-asm-writer)
 tablegen(LLVM X86GenAsmWriter1.inc -gen-asm-writer -asmwriternum=1)
@@ -65,6 +68,7 @@ set(sources
   X86VZeroUpper.cpp
   X86WinAllocaExpander.cpp
   X86WinEHState.cpp
+  X86TASECaptureTaint.cpp
   )
 
 add_llvm_target(X86CodeGen ${sources})
