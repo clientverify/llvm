@@ -40,9 +40,9 @@ def GetLo8XForm : SDNodeXForm<imm, [{
 
 // TODO what the heck does hasSideEffects even do?
 let hasSideEffects = 1, isCodeGenOnly = 1, SchedRW = [WriteSystem],
-    Predicates = [In64BitMode, HasRTM] in
+    Predicates = [In64BitMode, HasRTM] in {
   let Defs = [RAX, EFLAGS, R15, XMM8, XMM9, XMM10, XMM11, XMM13],
-      Uses = [XMM8, XMM9, XMM10, XMM11, XMM12, XMM13] {
+      Uses = [XMM8, XMM9, XMM10, XMM11, XMM12, XMM13] in {
     def TASE_TRAN_REOPEN : PseudoI<(outs), (ins), []>;
     // Delimit a new TASE block - but this block is *always* interpreted.
     // because it may have unpredictable symbolic control flow transfer.

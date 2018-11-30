@@ -26,7 +26,7 @@ static constexpr unsigned int TASE_INSTRS[] = {
   X86::PUSHF64, X86::POPF64,
   X86::MOV8rm, X86::MOV16rm, X86::MOV32rm, X86::MOV64rm, X86::MOV8rm_NOREX,
   X86::MOV8mr, X86::MOV16mr, X86::MOV32mr, X86::MOV64mr, X86::MOV8mr_NOREX,
-  X86::MOV8mi, X86::MOV16mi, X86::MOV32mi, X86::MOV64mi
+  X86::MOV8mi, X86::MOV16mi, X86::MOV32mi, X86::MOV64mi32
 };
 
 /* Ordered by size. */
@@ -35,11 +35,12 @@ static constexpr unsigned int VPINSR[] = {
 };
 
 static constexpr size_t Log2(size_t n) {
-  assert(n);
+  //assert(n);
   return ((n < 2) ? 0 : 1 + Log2(n/2));
 }
 
-#define LLVM_XMM(n)  X86::XMM ## n
+#define LLVM_XMM_EXPANDED(x, n) x ## n
+#define LLVM_XMM(n)  LLVM_XMM_EXPANDED(X86::XMM, n)
 
 static constexpr unsigned int TASE_REG_REFERENCE = LLVM_XMM(REG_REFERENCE);
 static constexpr unsigned int TASE_REG_ACCUMULATOR = LLVM_XMM(REG_ACCUMULATOR);

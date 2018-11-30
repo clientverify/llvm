@@ -3856,9 +3856,12 @@ void CodeGenDAGPatterns::InferInstructionFlags() {
   }
 
   Record* pred = Records.getDef("UseComplexMemInstrs");
-  assert((pred != nullptr) && "No complex memory instruction top-level predicate defined");
-
-  if (pred->isSubClassOf("TrueBasePredicate")) {
+  if (pred == nullptr) {
+    // May be a non-x86 architecture.  Let it do its thing.
+    LLVM_DEBUG(dbgs() << "Allowing complex memory instructions\n");
+    return;
+  }
+  else if (pred->isSubClassOf("TrueBasePredicate")) {
     // We are allowed to use all instructions.  We are done!
     return;
   }

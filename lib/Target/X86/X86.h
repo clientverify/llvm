@@ -126,6 +126,7 @@ InstructionSelector *createX86InstructionSelector(const X86TargetMachine &TM,
                                                   X86RegisterBankInfo &);
 
 void initializeEvexToVexInstPassPass(PassRegistry &);
+void initializeX86TASECaptureTaintPassPass(PassRegistry &);
 
 FunctionPass *createX86SpeculativeLoadHardeningPass();
 
