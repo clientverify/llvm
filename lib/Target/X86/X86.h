@@ -127,10 +127,14 @@ InstructionSelector *createX86InstructionSelector(const X86TargetMachine &TM,
 
 void initializeEvexToVexInstPassPass(PassRegistry &);
 void initializeX86TASECaptureTaintPassPass(PassRegistry &);
+void initializeX86TASEDecorateCartridgePassPass(PassRegistry &);
+void initializeX86TASEAddCartridgeSpringboardPassPass(PassRegistry &);
 
 FunctionPass *createX86SpeculativeLoadHardeningPass();
 
 FunctionPass *createX86TASECaptureTaint();
+FunctionPass *createX86TASEDecorateCartridge();
+FunctionPass *createX86TASEAddCartridgeSpringboard();
 
 } // End llvm namespace
 

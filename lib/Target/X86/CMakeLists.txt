@@ -65,6 +65,9 @@ set(sources
   X86VZeroUpper.cpp
   X86WinAllocaExpander.cpp
   X86WinEHState.cpp
+  X86TASE.cpp
+  X86TASEDecorateCartridge.cpp
+  X86TASEAddCartridgeSpringboard.cpp
   X86TASECaptureTaint.cpp
   )
 

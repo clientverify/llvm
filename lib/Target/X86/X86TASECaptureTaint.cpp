@@ -24,10 +24,6 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/ErrorOr.h"
-#include "llvm/Support/LineIterator.h"
-#include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cassert>
 // #include <iterator>
@@ -42,14 +38,6 @@ using namespace llvm;
 
 // STATISTIC(NumCondBranchesTraced, "Number of conditional branches traced");
 
-std::string TaseModeledFunctionsFile;
-static cl::opt<std::string, true> TaseModeledFunctionsFlag(
-    "x86-tase-modeled-functions",
-    cl::desc("File holding names of modeled functions that are to be interpreted."),
-    cl::value_desc("filename"),
-    cl::location(TaseModeledFunctionsFile),
-    cl::ValueRequired);
-
 namespace llvm {
 
 void initializeX86TASECaptureTaintPassPass(PassRegistry &);
@@ -57,17 +45,56 @@ void initializeX86TASECaptureTaintPassPass(PassRegistry &);
 
 namespace {
 
+template <typename... Ts>
+constexpr auto array_of(Ts&&... vals) -> std::array<unsigned int, sizeof...(Ts)> {
+  return {{ vals... }};
+}
+
+// TASE constants!
+// We can actually autogenerate this but I have these here to double check my understanding
+// of tblgen. To productionize this, see include/llvm/MC/MCInstrDesc.h.  You can add another
+// entry to enum Flag since isAllowedMemInstr is already part of Instruction in
+// include/llvm/Target/Target.td, it can be packed into the Flags field in the output of
+// tblgen and write an "isAllowedMemInstr" predicate in MCInstrDesc.h to mask and read
+// the value.
+//
+// Only 64-bit values are considered here.
+// In C++17, we could have directly sorted this array...  no such luck here.
+constexpr auto MEM_INSTRS = array_of(
+  X86::RETQ, X86::CALLpcrel16, X86::CALL64pcrel32, X86::CALL64r, X86::FARCALL64,
+  // The 16 bit versions are only here for completeness. It's still possible to
+  // encode sign-extending 16-bit pushes because you can still push fs/gs because
+  // fuck us all that's why.
+  X86::LEAVE64, X86::POP16r, X86::POP64r, X86::PUSH16r, X86::PUSH64r,
+  X86::PUSH64i8, X86::PUSH64i32, X86::PUSH16i8, X86::PUSHi16,
+  X86::PUSHF64, X86::POPF64,
+  X86::MOV8rm, X86::MOV16rm, X86::MOV32rm, X86::MOV64rm, X86::MOV8rm_NOREX,
+  X86::MOV8mr, X86::MOV16mr, X86::MOV32mr, X86::MOV64mr, X86::MOV8mr_NOREX,
+  X86::MOV8mi, X86::MOV16mi, X86::MOV32mi, X86::MOV64mi32,
+  X86::MOVZX16rm8, X86::MOVZX32rm8, X86::MOVZX32rm8_NOREX, X86::MOVZX32rm16,
+  X86::MOVZX64rm8, X86::MOVZX64rm16,
+  X86::MOVSX16rm8, X86::MOVSX32rm8, X86::MOVSX32rm8_NOREX, X86::MOVSX32rm16,
+  X86::MOVSX64rm8, X86::MOVSX64rm16, X86::MOVSX64rm32
+  );
+
+// Use C++11 trickery to extract the size of the array above at compile time.
+using meminstrs_t = std::array<unsigned int, MEM_INSTRS.size()>;
+
+const meminstrs_t &getSortedMemInstrs() {
+  static meminstrs_t instrs = MEM_INSTRS;
+  static bool first = true;
+  if (first) {
+    std::sort(instrs.begin(), instrs.end());
+  }
+  return instrs;
+}
+
+
 class X86TASECaptureTaintPass : public MachineFunctionPass {
 public:
   X86TASECaptureTaintPass() : MachineFunctionPass(ID),
-    TaseModeledFunctions(), UsageMask(0) {
-    // Doing an old fasion loop just to make sure we don't trip up
-    // the constexpr evaluator.
-    for (unsigned int i = 0; i < sizeof(TASE_INSTRS)/sizeof(TASE_INSTRS[0]); i++) {
-      SortedMemInstrs[i] = TASE_INSTRS[i];
-    }
-    std::sort(std::begin(SortedMemInstrs), std::end(SortedMemInstrs));
-
+    ModeledFunctions(getTASEModeledFunctions()),
+    SortedMemInstrs(getSortedMemInstrs()), UsageMask(0) {
     initializeX86TASECaptureTaintPassPass(
         *PassRegistry::getPassRegistry());
   }
@@ -75,8 +102,6 @@ public:
   StringRef getPassName() const override {
     return PASS_DESC;
   }
-
-  bool doInitialization(Module &M) override;
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
@@ -94,13 +119,13 @@ private:
   const X86InstrInfo *TII;
 //   const TargetRegisterInfo *TRI;
 
-  // If we had C++17, there's constexpr way to sort TASE_INSTRS but for now, we
-  // sort it anytime the pass is created.
-  unsigned int SortedMemInstrs[sizeof(TASE_INSTRS)/sizeof(TASE_INSTRS[0])];
-  std::vector<std::string> TaseModeledFunctions;
+  const std::vector<std::string> &ModeledFunctions;
+  // A list of every TASE instruction that can potentially read or write
+  // tainted values to or from memory.
+  const meminstrs_t &SortedMemInstrs;
   // Every bit represents whether the corresponding word in XMM_DATA has been
   // used.
-  uint8_t   UsageMask;
+  uint8_t UsageMask;
 
   bool InstrumentInstruction(MachineInstr &MI);
   bool PoisonCheckReg(MachineBasicBlock::instr_iterator MBBI,
@@ -115,36 +140,11 @@ private:
 
 char X86TASECaptureTaintPass::ID = 0;
 
-
-bool X86TASECaptureTaintPass::doInitialization(Module &M) {
-  if (TaseModeledFunctionsFile.empty()) {
-    report_fatal_error("TASE: Must provide path to a file listing modeled functions.");
-    return false;
-  }
-
-  std::unique_ptr<MemoryBuffer> MB =
-    std::move(MemoryBuffer::getFile(TaseModeledFunctionsFile).get());
-
-  for(line_iterator I = line_iterator(*MB); !I.is_at_eof(); I++) {
-    TaseModeledFunctions.push_back(I->str());
-  }
-
-  std::sort(TaseModeledFunctions.begin(), TaseModeledFunctions.end());
-  TaseModeledFunctions.erase(
-      std::unique(TaseModeledFunctions.begin(), TaseModeledFunctions.end()),
-      TaseModeledFunctions.end());
-
-  if (TaseModeledFunctions.empty()) {
-    report_fatal_error("TASE: No modeled functions found in function file.");
-  }
-  return false;
-}
-
 bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "********** " << getPassName() << " : " << MF.getName()
                     << " **********\n");
 
-  if (std::binary_search(TaseModeledFunctions.begin(), TaseModeledFunctions.end(), MF.getName())) {
+  if (std::binary_search(ModeledFunctions.begin(), ModeledFunctions.end(), MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Function is modeled in the interpreter\n.");
     return false;
   }
@@ -169,7 +169,7 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
         // Non-memory instructions need no instrumentation.
         continue;
       }
-      assert(std::binary_search(std::begin(SortedMemInstrs), std::end(SortedMemInstrs),
+      assert(std::binary_search(SortedMemInstrs.begin(), SortedMemInstrs.end(),
             MI.getOpcode()) && "TASE: Encountered an instruction we haven't handled.");
       modified |= InstrumentInstruction(MI);
       // Calls begin a new cartridge.
@@ -197,10 +197,14 @@ bool X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
   // instructions are moves and don't have tied operands.
   switch (MI.getOpcode()) {
     default:
-      llvm_unreachable("TASE: Unknown instructions.");
-    case X86::FARCALL64:
       MI.dump();
-      llvm_unreachable("TASE: Who's jumping across segmented code?");
+      llvm_unreachable("TASE: Unknown instructions.");
+      break;
+    case X86::FARCALL64:
+      errs() << "TASE: FARCALL64?";
+      MI.dump();
+      //llvm_unreachable("TASE: Who's jumping across segmented code?");
+      break;
     case X86::RETQ:
       // We are never going to have a symbolic return address - we are either
       // returning to a known target, or somone earlier wrote a symbolic value
@@ -208,6 +212,7 @@ bool X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
       // in which case, we would have detected the poison at that point.
     case X86::CALLpcrel16:
     case X86::CALLpcrel32:
+    case X86::CALL64r:
       // Fixed addresses cannot be symbolic.
       // A stack push is performed but if this was somehow symbolic, the call
       // would fail/abort.
@@ -220,6 +225,10 @@ bool X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
     case X86::PUSH16i8:
     case X86::PUSHi16:
       modified = PoisonCheckImm(curMBBI, MI.getOperand(0), size);
+      break;
+    case X86::PUSH16r:
+    case X86::PUSH64r:
+      modified = PoisonCheckReg(curMBBI, MI.getOperand(0), size);
       break;
     case X86::MOV8mi:
     case X86::MOV16mi:
@@ -234,6 +243,19 @@ bool X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
     case X86::MOV32rm:
     case X86::MOV64rm:
     case X86::MOV8rm_NOREX:
+    case X86::MOVZX16rm8:
+    case X86::MOVZX32rm8:
+    case X86::MOVZX32rm8_NOREX:
+    case X86::MOVZX32rm16:
+    case X86::MOVZX64rm8:
+    case X86::MOVZX64rm16:
+    case X86::MOVSX16rm8:
+    case X86::MOVSX32rm8:
+    case X86::MOVSX32rm8_NOREX:
+    case X86::MOVSX32rm16:
+    case X86::MOVSX64rm8:
+    case X86::MOVSX64rm16:
+    case X86::MOVSX64rm32:
       modified = PoisonCheckReg(nextMBBI, MI.getOperand(0), size);
       break;
     case X86::MOV8mr:
@@ -283,7 +305,11 @@ bool X86TASECaptureTaintPass::PoisonCheckReg(
   // LLVM_DEBUG(MBBI->dump(); MO->dump());
   assert(MO.isReg() && "TASE: Register expected.");
   assert(size && "TASE: Unknown register size - cannot check for poison.");
-  assert(size > 1 && "TASE: Ooops...  why are we checking 1 byte values?");
+  if (size == 1) {
+    // We can't handle byte values right now.
+    return false;
+  }
+  // assert(size > 1 && "TASE: Ooops...  why are we checking 1 byte values?");
   assert(size <= sizeof(uint64_t) && "TASE: Cannot handle SIMD registers and values > 64-bits.");
 
   // We want a word offset.
@@ -336,9 +362,15 @@ size_t X86TASECaptureTaintPass::getPoisonOperandSize(const MachineInstr &MI) con
   int size = 0;
   switch(MI.getOpcode()) {
     case X86::LEAVE64:
+    case X86::PUSH64r:
     case X86::POP64r:
     case X86::MOV64rm:
     case X86::MOV64mr:
+    case X86::MOVZX64rm8:
+    case X86::MOVZX64rm16:
+    case X86::MOVSX64rm8:
+    case X86::MOVSX64rm16:
+    case X86::MOVSX64rm32:
       size = 8;
       break;
     case X86::PUSH64i32:
@@ -346,13 +378,22 @@ size_t X86TASECaptureTaintPass::getPoisonOperandSize(const MachineInstr &MI) con
     case X86::MOV32mi:
     case X86::MOV32rm:
     case X86::MOV32mr:
+    case X86::MOVZX32rm8:
+    case X86::MOVZX32rm8_NOREX:
+    case X86::MOVZX32rm16:
+    case X86::MOVSX32rm8:
+    case X86::MOVSX32rm8_NOREX:
+    case X86::MOVSX32rm16:
       size = 4;
       break;
     case X86::PUSHi16:
+    case X86::PUSH16r:
     case X86::POP16r:
     case X86::MOV16mi:
     case X86::MOV16rm:
     case X86::MOV16mr:
+    case X86::MOVZX16rm8:
+    case X86::MOVSX16rm8:
       size = 2;
       break;
     case X86::PUSH64i8:
@@ -365,6 +406,7 @@ size_t X86TASECaptureTaintPass::getPoisonOperandSize(const MachineInstr &MI) con
       size = 1;
       break;
     case X86::FARCALL64:
+    case X86::CALL64r:
     case X86::RETQ:
     case X86::CALLpcrel16:
     case X86::CALLpcrel32:
