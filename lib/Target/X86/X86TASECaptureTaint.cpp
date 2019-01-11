@@ -324,7 +324,7 @@ bool X86TASECaptureTaintPass::PoisonCheckReg(
   uint8_t stride = size / 2;
   uint8_t mask = (1 << stride) - 1;
   int offset = 0;
-  // The < 8  here is sizeof(xmm)/8/2.
+  // The < 8  here is sizeof(xmm)/2.
   for (; offset < 8; offset += stride) {
     if ((UsageMask & (mask << offset)) == 0) {
       break;

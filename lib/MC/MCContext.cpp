@@ -58,7 +58,7 @@ MCContext::MCContext(const MCAsmInfo *mai, const MCRegisterInfo *mri,
                      const MCObjectFileInfo *mofi, const SourceMgr *mgr,
                      bool DoAutoReset)
     : SrcMgr(mgr), InlineSrcMgr(nullptr), MAI(mai), MRI(mri), MOFI(mofi),
-      Symbols(Allocator), UsedNames(Allocator),
+      Symbols(Allocator), CartridgeRecords(), UsedNames(Allocator),
       CurrentDwarfLoc(0, 0, 0, DWARF2_FLAG_IS_STMT, 0, 0),
       AutoReset(DoAutoReset) {
   SecureLogFile = AsSecureLogFileName;
@@ -87,6 +87,7 @@ void MCContext::reset() {
   MachOAllocator.DestroyAll();
 
   MCSubtargetAllocator.DestroyAll();
+  CartridgeRecords.clear();
   UsedNames.clear();
   Symbols.clear();
   Allocator.Reset();
@@ -131,6 +132,20 @@ MCSymbol *MCContext::getOrCreateSymbol(const Twine &Name) {
     Sym = createSymbol(NameRef, false, false);
 
   return Sym;
+}
+
+MCCartridgeRecord *MCContext::createCartridgeRecord() {
+  MCCartridgeRecord *record = new (*this) MCCartridgeRecord(
+      createTempSymbol("TASECartridgeHeader", true, false),
+      createTempSymbol("TASECartridgeRecord", true, false),
+      createTempSymbol("TASECartridgeBody", true, false),
+      createTempSymbol("TASECartridgeEnd", true, false));
+  CartridgeRecords.push_back(record);
+  return record;
+}
+
+const std::vector<MCCartridgeRecord *> *MCContext::getAllCartridgeRecords() const {
+  return &CartridgeRecords;
 }
 
 MCSymbol *MCContext::getOrCreateFrameAllocSymbol(StringRef FuncName,
