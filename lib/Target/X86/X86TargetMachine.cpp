@@ -71,6 +71,7 @@ void initializeX86AvoidSFBPassPass(PassRegistry &);
 void initializeX86SpeculativeLoadHardeningPassPass(PassRegistry &);
 void initializeX86FlagsCopyLoweringPassPass(PassRegistry &);
 void initializeX86TASECaptureTaintPassPass(PassRegistry &);
+void initializeX86TASEAddCartridgeSpringboardPassPass(PassRegistry &);
 
 } // end namespace llvm
 
@@ -94,6 +95,7 @@ extern "C" void LLVMInitializeX86Target() {
   initializeX86SpeculativeLoadHardeningPassPass(PR);
   initializeX86FlagsCopyLoweringPassPass(PR);
   initializeX86TASECaptureTaintPassPass(PR);
+  initializeX86TASEAddCartridgeSpringboardPassPass(PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -524,4 +526,5 @@ void X86PassConfig::addPreEmitPass2() {
     addPass(createCFIInstrInserter());
 
   addPass(createX86TASECaptureTaint());
+  addPass(createX86TASEAddCartridgeSpringboard());
 }
