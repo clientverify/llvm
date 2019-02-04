@@ -82,6 +82,7 @@ class X86TASECaptureTaintPass : public MachineFunctionPass {
 public:
   X86TASECaptureTaintPass() : MachineFunctionPass(ID),
     CurrentMI(nullptr),
+    NextMII(nullptr),
     ModeledFunctions(getTASEModeledFunctions()),
     SortedMemInstrs(getSortedMemInstrs()),
     UsageMask(0) {
@@ -109,6 +110,7 @@ private:
   const X86InstrInfo *TII;
 //   const TargetRegisterInfo *TRI;
   MachineInstr *CurrentMI;
+  MachineBasicBlock::instr_iterator NextMII;
 
   const std::vector<std::string> &ModeledFunctions;
   // A list of every TASE instruction that can potentially read or write
@@ -119,7 +121,7 @@ private:
   uint8_t UsageMask;
 
   void InstrumentInstruction(MachineInstr &MI);
-  MachineInstrBuilder InsertInstr(unsigned int opcode, unsigned int destReg);
+  MachineInstrBuilder InsertInstr(unsigned int opcode, unsigned int destReg, bool append = false);
   uint8_t AllocateOffset(size_t size);
   void PoisonCheckReg(size_t size);
   void PoisonCheckStack(int64_t stackOffset);
@@ -180,6 +182,7 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
 //
 void X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
   CurrentMI = &MI;
+  NextMII = std::next(MachineBasicBlock::instr_iterator(MI));
   switch (MI.getOpcode()) {
     default:
       MI.dump();
@@ -264,10 +267,11 @@ void X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
   CurrentMI = nullptr;
 }
 
-MachineInstrBuilder X86TASECaptureTaintPass::InsertInstr(unsigned int opcode, unsigned int destReg) {
+MachineInstrBuilder X86TASECaptureTaintPass::InsertInstr(unsigned int opcode, unsigned int destReg, bool append) {
   assert(CurrentMI && "TASE: Must only be called in the context of of instrumenting an instruction.");
-  return BuildMI(*CurrentMI->getParent(), CurrentMI, CurrentMI->getDebugLoc(),
-      TII->get(opcode), destReg);
+  return BuildMI(*CurrentMI->getParent(),
+      append ? NextMII : MachineBasicBlock::instr_iterator(CurrentMI),
+      CurrentMI->getDebugLoc(), TII->get(opcode), destReg);
 }
 
 uint8_t X86TASECaptureTaintPass::AllocateOffset(size_t size) {
@@ -369,14 +373,14 @@ void X86TASECaptureTaintPass::PoisonCheckReg(size_t size) {
 
   if (size == 16) {
     UsageMask = 0;
-    InsertInstr(X86::VPCMPEQDrr, TASE_REG_DATA)
+    InsertInstr(X86::VPCMPEQDrr, TASE_REG_DATA, true)
       .add(CurrentMI->getOperand(0))
       .addReg(TASE_REG_REFERENCE);
     InsertInstr(X86::VPORrr, TASE_REG_ACCUMULATOR)
       .addReg(TASE_REG_ACCUMULATOR)
       .addReg(TASE_REG_DATA);
   } else {
-    InsertInstr(VPINSRrr[Log2(size)], TASE_REG_DATA)
+    InsertInstr(VPINSRrr[Log2(size)], TASE_REG_DATA, true)
       .addReg(TASE_REG_DATA)
       .addReg(getX86SubSuperRegister(CurrentMI->getOperand(0).getReg(), size * 8))
       .addImm(2 * offset / size);

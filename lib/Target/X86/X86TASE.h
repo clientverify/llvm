@@ -28,7 +28,8 @@ static constexpr size_t Log2(size_t n) {
 static constexpr unsigned int TASE_REG_REFERENCE = LLVM_XMM(REG_REFERENCE);
 static constexpr unsigned int TASE_REG_ACCUMULATOR = LLVM_XMM(REG_ACCUMULATOR);
 static constexpr unsigned int TASE_REG_DATA = LLVM_XMM(REG_DATA);
-static constexpr unsigned int TASE_REG_CARTRIDGE = LLVM_XMM(REG_CARTRIDGE);
+static constexpr unsigned int TASE_REG_STATUS = LLVM_XMM(REG_STATUS);
+static constexpr unsigned int TASE_REG_CONTEXT = LLVM_XMM(REG_CONTEXT);
 
 extern const std::vector<std::string> &getTASEModeledFunctions();
 }

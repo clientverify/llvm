@@ -88,12 +88,13 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::emitSpringboard(MachineFu
   MBBILastInstr->setPostInstrSymbol(MF, cartridge->End);
 
   // Load the cartridge record for this block but don't overwrite the status flags.
+  /*
   BuildMI(*(MBBIFirstInstr->getParent()), MBBIFirstInstr, MBBIFirstInstr->getDebugLoc(), TII->get(X86::VPBLENDWrmi), TASE_REG_CARTRIDGE)
-    .addReg(TASE_REG_CARTRIDGE)
+    .addReg(TASE_REG_STATUS)
     .addSym(cartridge->Record)
     .addImm((1 << (SB_FLAG_MODE_IDX / 2)) - 1)
     ->setPreInstrSymbol(MF, cartridge->Header);
-
+  */
   return cartridge;
 }
 
@@ -111,9 +112,10 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
     MachineBasicBlock::instr_iterator MBBI = MBB.instr_begin();
     emitSpringboard(MF, MBBI, MBBI);
     // Request ejection in the header by merging the flag bits.
+    /*
     BuildMI(MBB, MBBI, MBBI->getDebugLoc(), TII->get(X86::VPANDrm), TASE_REG_CARTRIDGE)
       .addReg(TASE_REG_CARTRIDGE)
-      .addExternalSymbol("modeled_function_mask");
+      .addExternalSymbol("modeled_function_mask");*/
   } else {
     for (MachineBasicBlock &MBB : MF) {
       MachineBasicBlock::instr_iterator MBBIStart = MBB.instr_begin();
