@@ -1179,7 +1179,7 @@ let hasSideEffects = 0, SchedRW = [WriteNop] in {
 def ENTER : Ii16<0xC8, RawFrmImm8, (outs), (ins i16imm:$len, i8imm:$lvl),
                  "enter\t$len, $lvl", []>, Sched<[WriteMicrocoded]>;
 
-let SchedRW = [WriteALU], isAllowedMemInstr = 1 in {
+let SchedRW = [WriteALU] in {
   let Defs = [EBP, ESP], Uses = [EBP, ESP], mayLoad = 1, hasSideEffects=0 in
   def LEAVE    : I<0xC9, RawFrm, (outs), (ins), "leave", []>,
                   Requires<[Not64BitMode]>;
@@ -1200,12 +1200,10 @@ let isBarrier = 1, hasSideEffects = 1, usesCustomInserter = 1,
 
 let Defs = [ESP], Uses = [ESP], hasSideEffects=0 in {
   let mayLoad = 1, SchedRW = [WriteLoad] in {
-    let isAllowedMemInstr = 1 in {
-      def POP16r  : I<0x58, AddRegFrm, (outs GR16:$reg), (ins), "pop{w}\t$reg", []>,
-                      OpSize16;
-      def POP32r  : I<0x58, AddRegFrm, (outs GR32:$reg), (ins), "pop{l}\t$reg", []>,
-                      OpSize32, Requires<[Not64BitMode]>;
-    }
+    def POP16r  : I<0x58, AddRegFrm, (outs GR16:$reg), (ins), "pop{w}\t$reg", []>,
+                    OpSize16;
+    def POP32r  : I<0x58, AddRegFrm, (outs GR32:$reg), (ins), "pop{l}\t$reg", []>,
+                    OpSize32, Requires<[Not64BitMode]>;
     // Long form for the disassembler.
     let isCodeGenOnly = 1, ForceDisassemble = 1 in {
       def POP16rmr: I<0x8F, MRM0r, (outs GR16:$reg), (ins), "pop{w}\t$reg", []>,
@@ -1222,12 +1220,10 @@ let Defs = [ESP], Uses = [ESP], hasSideEffects=0 in {
   } // mayStore, mayLoad, WriteRMW
 
   let mayStore = 1, SchedRW = [WriteStore] in {
-    let isAllowedMemInstr = 1 in {
-      def PUSH16r  : I<0x50, AddRegFrm, (outs), (ins GR16:$reg), "push{w}\t$reg",[]>,
-                      OpSize16;
-      def PUSH32r  : I<0x50, AddRegFrm, (outs), (ins GR32:$reg), "push{l}\t$reg",[]>,
-                      OpSize32, Requires<[Not64BitMode]>;
-    }
+    def PUSH16r  : I<0x50, AddRegFrm, (outs), (ins GR16:$reg), "push{w}\t$reg",[]>,
+                    OpSize16;
+    def PUSH32r  : I<0x50, AddRegFrm, (outs), (ins GR32:$reg), "push{l}\t$reg",[]>,
+                    OpSize32, Requires<[Not64BitMode]>;
     // Long form for the disassembler.
     let isCodeGenOnly = 1, ForceDisassemble = 1 in {
       def PUSH16rmr: I<0xFF, MRM6r, (outs), (ins GR16:$reg), "push{w}\t$reg",[]>,
@@ -1236,19 +1232,20 @@ let Defs = [ESP], Uses = [ESP], hasSideEffects=0 in {
                       OpSize32, Requires<[Not64BitMode]>, NotMemoryFoldable;
     } // isCodeGenOnly = 1, ForceDisassemble = 1
 
-    let isAllowedMemInstr = 1 in {
-      def PUSH16i8 : Ii8<0x6a, RawFrm, (outs), (ins i16i8imm:$imm),
-                        "push{w}\t$imm", []>, OpSize16;
-      def PUSHi16  : Ii16<0x68, RawFrm, (outs), (ins i16imm:$imm),
-                        "push{w}\t$imm", []>, OpSize16;
+    def PUSH16i8 : Ii8<0x6a, RawFrm, (outs), (ins i16i8imm:$imm),
+                      "push{w}\t$imm", []>, OpSize16;
+    // TASE TODO: I can't figure out what the operand size of this thing is.
+    // Is it actually 16-but or is it an "address-size" push of an i16?
+    // Just disable it until we are sure.
+    def PUSHi16  : Ii16<0x68, RawFrm, (outs), (ins i16imm:$imm),
+                      "push{w}\t$imm", []>, OpSize16;
 
-      def PUSH32i8 : Ii8<0x6a, RawFrm, (outs), (ins i32i8imm:$imm),
-                        "push{l}\t$imm", []>, OpSize32,
-                        Requires<[Not64BitMode]>;
-      def PUSHi32  : Ii32<0x68, RawFrm, (outs), (ins i32imm:$imm),
-                        "push{l}\t$imm", []>, OpSize32,
-                        Requires<[Not64BitMode]>;
-    }
+    def PUSH32i8 : Ii8<0x6a, RawFrm, (outs), (ins i32i8imm:$imm),
+                      "push{l}\t$imm", []>, OpSize32,
+                      Requires<[Not64BitMode]>;
+    def PUSHi32  : Ii32<0x68, RawFrm, (outs), (ins i32imm:$imm),
+                      "push{l}\t$imm", []>, OpSize32,
+                      Requires<[Not64BitMode]>;
   } // mayStore, SchedRW
 
   let mayLoad = 1, mayStore = 1, SchedRW = [WriteRMW] in {
@@ -1286,22 +1283,19 @@ let mayLoad = 1, mayStore = 1, usesCustomInserter = 1,
                 Requires<[In64BitMode]>;
 }
 
-// TASE TODO: When we support 32-bit codegen, re-enable this.
-// let isAllowedMemInstr = 1 in  {
-  let Defs = [ESP, EFLAGS, DF], Uses = [ESP], mayLoad = 1, hasSideEffects=0,
-      SchedRW = [WriteLoad] in {
-    def POPF16   : I<0x9D, RawFrm, (outs), (ins), "popf{w}", []>, OpSize16;
-    def POPF32   : I<0x9D, RawFrm, (outs), (ins), "popf{l|d}", []>, OpSize32,
-                    Requires<[Not64BitMode]>;
-  }
+let Defs = [ESP, EFLAGS, DF], Uses = [ESP], mayLoad = 1, hasSideEffects=0,
+    SchedRW = [WriteLoad] in {
+  def POPF16   : I<0x9D, RawFrm, (outs), (ins), "popf{w}", []>, OpSize16;
+  def POPF32   : I<0x9D, RawFrm, (outs), (ins), "popf{l|d}", []>, OpSize32,
+                  Requires<[Not64BitMode]>;
+}
 
-  let Defs = [ESP], Uses = [ESP, EFLAGS, DF], mayStore = 1, hasSideEffects=0,
-      SchedRW = [WriteStore] in {
-    def PUSHF16  : I<0x9C, RawFrm, (outs), (ins), "pushf{w}", []>, OpSize16;
-    def PUSHF32  : I<0x9C, RawFrm, (outs), (ins), "pushf{l|d}", []>, OpSize32,
-                    Requires<[Not64BitMode]>;
-  }
-// }
+let Defs = [ESP], Uses = [ESP, EFLAGS, DF], mayStore = 1, hasSideEffects=0,
+    SchedRW = [WriteStore] in {
+  def PUSHF16  : I<0x9C, RawFrm, (outs), (ins), "pushf{w}", []>, OpSize16;
+  def PUSHF32  : I<0x9C, RawFrm, (outs), (ins), "pushf{l|d}", []>, OpSize32,
+                  Requires<[Not64BitMode]>;
+}
 
 let Defs = [RSP], Uses = [RSP], hasSideEffects=0 in {
   let mayLoad = 1, SchedRW = [WriteLoad] in {

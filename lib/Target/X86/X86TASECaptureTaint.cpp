@@ -12,22 +12,14 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
-// #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineOperand.h"
-// #include "llvm/CodeGen/MachineRegisterInfo.h"
-// #include "llvm/CodeGen/MachineSSAUpdater.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
-// #include "llvm/CodeGen/TargetRegisterInfo.h"
-// #include "llvm/CodeGen/TargetSchedule.h"
-// #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include <algorithm>
 #include <cassert>
-// #include <iterator>
-// #include <utility>
 
 using namespace llvm;
 
@@ -62,11 +54,7 @@ constexpr auto array_of(Ts&&... vals) -> std::array<unsigned int, sizeof...(Ts)>
 // In C++17, we could have directly sorted this array...  no such luck here.
 constexpr auto MEM_INSTRS = array_of(
   X86::RETQ, X86::CALLpcrel16, X86::CALL64pcrel32, X86::CALL64r, X86::FARCALL64,
-  // The 16 bit versions are only here for completeness. It's still possible to
-  // encode sign-extending 16-bit pushes because you can still push fs/gs because
-  // fuck us all that's why.
-  X86::LEAVE64, X86::POP16r, X86::POP64r, X86::PUSH16r, X86::PUSH64r,
-  X86::PUSH64i8, X86::PUSH64i32, X86::PUSH16i8, X86::PUSHi16,
+  X86::POP64r, X86::PUSH64r, X86::PUSH64i8, X86::PUSH64i32,
   X86::PUSHF64, X86::POPF64,
   X86::MOV8rm, X86::MOV16rm, X86::MOV32rm, X86::MOV64rm, X86::MOV8rm_NOREX,
   X86::MOV8mr, X86::MOV16mr, X86::MOV32mr, X86::MOV64mr, X86::MOV8mr_NOREX,
@@ -93,8 +81,10 @@ const meminstrs_t &getSortedMemInstrs() {
 class X86TASECaptureTaintPass : public MachineFunctionPass {
 public:
   X86TASECaptureTaintPass() : MachineFunctionPass(ID),
+    CurrentMI(nullptr),
     ModeledFunctions(getTASEModeledFunctions()),
-    SortedMemInstrs(getSortedMemInstrs()), UsageMask(0) {
+    SortedMemInstrs(getSortedMemInstrs()),
+    UsageMask(0) {
     initializeX86TASECaptureTaintPassPass(
         *PassRegistry::getPassRegistry());
   }
@@ -118,6 +108,7 @@ private:
 //   MachineRegisterInfo *MRI;
   const X86InstrInfo *TII;
 //   const TargetRegisterInfo *TRI;
+  MachineInstr *CurrentMI;
 
   const std::vector<std::string> &ModeledFunctions;
   // A list of every TASE instruction that can potentially read or write
@@ -127,12 +118,12 @@ private:
   // used.
   uint8_t UsageMask;
 
-  bool InstrumentInstruction(MachineInstr &MI);
-  bool PoisonCheckReg(MachineBasicBlock::instr_iterator MBBI,
-      const MachineOperand &MO, size_t size);
-  bool PoisonCheckImm(MachineBasicBlock::instr_iterator MBBI,
-      const MachineOperand &MO, size_t size);
-  size_t getPoisonOperandSize(const MachineInstr &MI) const;
+  void InstrumentInstruction(MachineInstr &MI);
+  MachineInstrBuilder InsertInstr(unsigned int opcode, unsigned int destReg);
+  uint8_t AllocateOffset(size_t size);
+  void PoisonCheckReg(size_t size);
+  void PoisonCheckStack(int64_t stackOffset);
+  void PoisonCheckMem(size_t size);
 };
 
 } // end anonymous namespace
@@ -171,7 +162,8 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
       }
       assert(std::binary_search(SortedMemInstrs.begin(), SortedMemInstrs.end(),
             MI.getOpcode()) && "TASE: Encountered an instruction we haven't handled.");
-      modified |= InstrumentInstruction(MI);
+      InstrumentInstruction(MI);
+      modified = true;
       // Calls begin a new cartridge.
       // TODO: When cartridge identification is performed, use the pseudoinstruction
       // for that to identify cartridge boundaries.
@@ -186,15 +178,8 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
 // Appends a poison check to load instructions and prepends a poison check to
 // a store instructions. Expects to see only known instructions.
 //
-bool X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
-  MachineBasicBlock::instr_iterator curMBBI(MI);
-  MachineBasicBlock::instr_iterator nextMBBI(std::next(curMBBI));
-
-  size_t size = getPoisonOperandSize(MI);
-  bool modified = false;
-
-  // We don't need to bother with operand bias because we know these
-  // instructions are moves and don't have tied operands.
+void X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
+  CurrentMI = &MI;
   switch (MI.getOpcode()) {
     default:
       MI.dump();
@@ -205,112 +190,89 @@ bool X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
       MI.dump();
       //llvm_unreachable("TASE: Who's jumping across segmented code?");
       break;
+    case X86::POP64r:
+      // Fast path
+      PoisonCheckReg(8);
+      break;
     case X86::RETQ:
-      // We are never going to have a symbolic return address - we are either
-      // returning to a known target, or somone earlier wrote a symbolic value
-      // to the stack explicitly (in a buffer overflow attack kind of way)
-      // in which case, we would have detected the poison at that point.
+      // We should not have a symbolic return address but we treat this as a
+      // standard pop of the stack just in case.
+    case X86::POPF64:
+      PoisonCheckStack(0);
+      break;
     case X86::CALLpcrel16:
     case X86::CALLpcrel32:
     case X86::CALL64r:
-      // Fixed addresses cannot be symbolic.
-      // A stack push is performed but if this was somehow symbolic, the call
-      // would fail/abort.
-      break;
-    case X86::LEAVE64:
-      modified = PoisonCheckReg(nextMBBI, MachineOperand::CreateReg(X86::RBP, false), size);
-      break;
+      // Fixed addresses cannot be symbolic. Indirect calls are detected as
+      // symbolic when their base address is loaded and calculated.
+      // A stack push is performed and since we don't sweep old poison
+      // indicators and (now-stale) marked symbolic values from the stack when
+      // returning, we check to see if we are pushing into a "symbolic" stack
+      // cell.
     case X86::PUSH64i8:
     case X86::PUSH64i32:
-    case X86::PUSH16i8:
-    case X86::PUSHi16:
-      modified = PoisonCheckImm(curMBBI, MI.getOperand(0), size);
-      break;
-    case X86::PUSH16r:
     case X86::PUSH64r:
-      modified = PoisonCheckReg(curMBBI, MI.getOperand(0), size);
+    case X86::PUSHF64:
+      // Values are zero-extended during the push - so check the entire stack
+      // slot for poison before the write.
+      PoisonCheckStack(-8);
       break;
     case X86::MOV8mi:
-    case X86::MOV16mi:
-    case X86::MOV32mi:
-    case X86::MOV64mi32:
-      modified = PoisonCheckImm(curMBBI, MI.getOperand(X86::AddrNumOperands), size);
-      break;
-    case X86::POP16r:
-    case X86::POP64r:
+    case X86::MOV8mr:
+    case X86::MOV8mr_NOREX:
     case X86::MOV8rm:
-    case X86::MOV16rm:
-    case X86::MOV32rm:
-    case X86::MOV64rm:
     case X86::MOV8rm_NOREX:
     case X86::MOVZX16rm8:
     case X86::MOVZX32rm8:
     case X86::MOVZX32rm8_NOREX:
-    case X86::MOVZX32rm16:
     case X86::MOVZX64rm8:
-    case X86::MOVZX64rm16:
     case X86::MOVSX16rm8:
     case X86::MOVSX32rm8:
     case X86::MOVSX32rm8_NOREX:
-    case X86::MOVSX32rm16:
     case X86::MOVSX64rm8:
-    case X86::MOVSX64rm16:
-    case X86::MOVSX64rm32:
-      modified = PoisonCheckReg(nextMBBI, MI.getOperand(0), size);
+      // For 8 bit memory accesses, we want access to the address so that we can
+      // appropriately align it for our 2 byte poison check.
+      PoisonCheckMem(1);
       break;
-    case X86::MOV8mr:
+    case X86::MOV16mi:
     case X86::MOV16mr:
-    case X86::MOV32mr:
-    case X86::MOV64mr:
-    case X86::MOV8mr_NOREX:
-      modified = PoisonCheckReg(curMBBI, MI.getOperand(X86::AddrNumOperands), size);
+      PoisonCheckMem(2);
       break;
-    case X86::PUSHF64:
-      // Well that can't possibly be poison.
-    case X86::POPF64:
-      MI.dump();
-      // We will need to beg the compiler for a free register or special case
-      // this to make an aligned read of an entire xmm register.
-      llvm_unreachable("TASE: Flag poison not considered yet.");
+    case X86::MOV16rm:
+    case X86::MOVZX32rm16:
+    case X86::MOVZX64rm16:
+    case X86::MOVSX32rm16:
+    case X86::MOVSX64rm16:
+      PoisonCheckReg(2);
+      break;
+    case X86::MOV32mi:
+    case X86::MOV32mr:
+      PoisonCheckMem(4);
+      break;
+    case X86::MOV32rm:
+    case X86::MOVSX64rm32:
+      PoisonCheckReg(4);
+      break;
+    case X86::MOV64mi32:
+    case X86::MOV64mr:
+      PoisonCheckMem(8);
+      break;
+    case X86::MOV64rm:
+      PoisonCheckReg(8);
+      break;
   }
-  return modified;
+  CurrentMI = nullptr;
 }
 
-bool X86TASECaptureTaintPass::PoisonCheckImm(
-    MachineBasicBlock::instr_iterator MBBI, const MachineOperand &MO, size_t size) {
-  // LLVM_DEBUG(MBBI->dump(); MO->dump());
-  assert(MO.isImm() && "TASE: Immediate expected.");
-  assert(size && "TASE: Unknown operand size - why does it have an immediate?");
-  assert(size <= sizeof(uint64_t) && "TASE: Cannot handle SIMD registers and values > 64-bits.");
-
-  // Note that this will leave 1 byte values with 0xFF as the significant mask.
-  // That's ok! One byte immediates can *never* match the poison.
-  uint64_t significant = (1 << (8 * size)) - 1;
-  // Should have 1 bits in places where the immediate disagrees with the reference.
-  if ((MO.getImm() & significant) != (POISON_REFERENCE64 & significant))
-    return false;
-
-  // Just abort the entire thing! But wait! We might be a system function
-  // running with instrumentation disabled? Huh...  well, just sabotage ourselves.
-  BuildMI(*(MBBI->getParent()), MBBI, MBBI->getDebugLoc(), TII->get(X86::VPCMPEQDrr),
-      TASE_REG_ACCUMULATOR)
-    .addReg(TASE_REG_ACCUMULATOR)
-    .addReg(TASE_REG_ACCUMULATOR);
-  UsageMask = 0;
-  return true;
+MachineInstrBuilder X86TASECaptureTaintPass::InsertInstr(unsigned int opcode, unsigned int destReg) {
+  assert(CurrentMI && "TASE: Must only be called in the context of of instrumenting an instruction.");
+  return BuildMI(*CurrentMI->getParent(), CurrentMI, CurrentMI->getDebugLoc(),
+      TII->get(opcode), destReg);
 }
 
-bool X86TASECaptureTaintPass::PoisonCheckReg(
-    MachineBasicBlock::instr_iterator MBBI, const MachineOperand &MO, size_t size) {
-  // LLVM_DEBUG(MBBI->dump(); MO->dump());
-  assert(MO.isReg() && "TASE: Register expected.");
-  assert(size && "TASE: Unknown register size - cannot check for poison.");
-  if (size == 1) {
-    // We can't handle byte values right now.
-    return false;
-  }
-  // assert(size > 1 && "TASE: Ooops...  why are we checking 1 byte values?");
-  assert(size <= sizeof(uint64_t) && "TASE: Cannot handle SIMD registers and values > 64-bits.");
+uint8_t X86TASECaptureTaintPass::AllocateOffset(size_t size) {
+  assert(size && "TASE: Unknown operand size - cannot check for poison.");
+  assert(size <= 16 && "TASE: Cannot handle values > 128-bits.");
 
   // We want a word offset.
   // Examples:
@@ -323,9 +285,9 @@ bool X86TASECaptureTaintPass::PoisonCheckReg(
   // => offset/stride in [0, 1, 2, 3]
   uint8_t stride = size / 2;
   uint8_t mask = (1 << stride) - 1;
-  int offset = 0;
+  uint8_t offset = 0;
   // The < 8  here is sizeof(xmm)/2.
-  for (; offset < 8; offset += stride) {
+  for (; offset < XMMREG_SIZE / 2; offset += stride) {
     if ((UsageMask & (mask << offset)) == 0) {
       break;
     }
@@ -334,88 +296,91 @@ bool X86TASECaptureTaintPass::PoisonCheckReg(
   // Compare and reload.
   if (offset == 8) {
     // Compare in 2 byte chunks always.
-    BuildMI(*(MBBI->getParent()), MBBI, MBBI->getDebugLoc(), TII->get(X86::VPCMPEQDrr),
-        TASE_REG_DATA)
+    InsertInstr(X86::VPCMPEQDrr, TASE_REG_DATA)
       .addReg(TASE_REG_DATA)
       .addReg(TASE_REG_REFERENCE);
-    BuildMI(*(MBBI->getParent()), MBBI, MBBI->getDebugLoc(), TII->get(X86::VPORrr),
-        TASE_REG_ACCUMULATOR)
+    InsertInstr(X86::VPORrr, TASE_REG_ACCUMULATOR)
       .addReg(TASE_REG_ACCUMULATOR)
       .addReg(TASE_REG_DATA);
     UsageMask = 0;
     offset = 0;
   }
 
-  // Stash our poison.
-  unsigned int reg = MO.getReg();
-  BuildMI(*(MBBI->getParent()), MBBI, MBBI->getDebugLoc(), TII->get(VPINSR[Log2(size)]),
-      TASE_REG_DATA)
-    .addReg(TASE_REG_DATA)
-    .addReg(reg)
-    .addImm(offset/stride);
+  // Mark the new words as being used.
   UsageMask |= mask << offset;
-
-  return true;
+  return offset;
 }
 
-size_t X86TASECaptureTaintPass::getPoisonOperandSize(const MachineInstr &MI) const {
-  int size = 0;
-  switch(MI.getOpcode()) {
-    case X86::LEAVE64:
-    case X86::PUSH64r:
-    case X86::POP64r:
-    case X86::MOV64rm:
-    case X86::MOV64mr:
-    case X86::MOVZX64rm8:
-    case X86::MOVZX64rm16:
-    case X86::MOVSX64rm8:
-    case X86::MOVSX64rm16:
-    case X86::MOVSX64rm32:
-      size = 8;
-      break;
-    case X86::PUSH64i32:
-    case X86::MOV64mi32:
-    case X86::MOV32mi:
-    case X86::MOV32rm:
-    case X86::MOV32mr:
-    case X86::MOVZX32rm8:
-    case X86::MOVZX32rm8_NOREX:
-    case X86::MOVZX32rm16:
-    case X86::MOVSX32rm8:
-    case X86::MOVSX32rm8_NOREX:
-    case X86::MOVSX32rm16:
-      size = 4;
-      break;
-    case X86::PUSHi16:
-    case X86::PUSH16r:
-    case X86::POP16r:
-    case X86::MOV16mi:
-    case X86::MOV16rm:
-    case X86::MOV16mr:
-    case X86::MOVZX16rm8:
-    case X86::MOVSX16rm8:
-      size = 2;
-      break;
-    case X86::PUSH64i8:
-    case X86::PUSH16i8:
-    case X86::MOV8mi:
-    case X86::MOV8rm:
-    case X86::MOV8rm_NOREX:
-    case X86::MOV8mr:
-    case X86::MOV8mr_NOREX:
-      size = 1;
-      break;
-    case X86::FARCALL64:
-    case X86::CALL64r:
-    case X86::RETQ:
-    case X86::CALLpcrel16:
-    case X86::CALLpcrel32:
-    case X86::PUSHF64:
-    case X86::POPF64:
-    default:
-      size = 0;
+void X86TASECaptureTaintPass::PoisonCheckStack(int64_t stackOffset) {
+  const size_t stackAlignment = 8;
+  assert(stackOffset % stackAlignment == 0 && "TASE: Unaligned offset into the stack - must be multiple of 8");
+
+  uint8_t offset = AllocateOffset(stackAlignment);
+  InsertInstr(VPINSRrm[Log2(stackAlignment)], TASE_REG_DATA)
+    .addReg(TASE_REG_DATA)
+    .addReg(X86::RSP)         // base
+    .addImm(1)                // scale
+    .addReg(X86::NoRegister)  // index
+    .addImm(stackOffset)           // offset
+    .addReg(X86::NoRegister)  // segment
+    .addImm(2 * offset / stackAlignment);
+  // TODO: Check if we need MIB.cloneMemRefs or MIB.addMemRefs.
+}
+
+void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
+  // assert(size > 1 && "TASE: Ooops...  why are we checking 1 byte values?");
+  if (size == 1) {
+    // We can't handle byte values right now.
+    return;
   }
-  return size;
+  uint8_t offset = AllocateOffset(size);
+
+  int addrOffset = X86II::getMemoryOperandNo(CurrentMI->getDesc().TSFlags);
+  assert(addrOffset && "TASE: Unable to determine instruction memory operand!");
+  addrOffset += X86II::getOperandBias(CurrentMI->getDesc());
+
+  // Stash our poison - use the given memory operands as our source.
+  if (size == 16) {
+    // We are guaranteed to have cleared the data register.  Directly compare into it.
+    UsageMask = 0;
+    MachineInstrBuilder MIB = InsertInstr(X86::VPCMPEQDrm, TASE_REG_DATA);
+    MIB.addReg(TASE_REG_REFERENCE);
+    for (int i = 0; i < X86::AddrNumOperands; i++) {
+      MIB.add(CurrentMI->getOperand(addrOffset + i));
+    }
+    InsertInstr(X86::VPORrr, TASE_REG_ACCUMULATOR)
+      .addReg(TASE_REG_ACCUMULATOR)
+      .addReg(TASE_REG_DATA);
+  } else {
+    MachineInstrBuilder MIB = InsertInstr(VPINSRrm[Log2(size)], TASE_REG_DATA);
+    MIB.addReg(TASE_REG_DATA);
+    for (int i = 0; i < X86::AddrNumOperands; i++) {
+      MIB.add(CurrentMI->getOperand(addrOffset + i));
+    }
+    MIB.addImm(2 * offset / size);
+    // TODO: Check if we need MIB.cloneMemRefs or MIB.addMemRefs.
+  }
+}
+
+// Optimized fast-path case where we can simply check the value from a destination register.
+void X86TASECaptureTaintPass::PoisonCheckReg(size_t size) {
+  assert(size > 1 && "TASE: Cannot do a register-optimized poison check on byte value.");
+  uint8_t offset = AllocateOffset(size);
+
+  if (size == 16) {
+    UsageMask = 0;
+    InsertInstr(X86::VPCMPEQDrr, TASE_REG_DATA)
+      .add(CurrentMI->getOperand(0))
+      .addReg(TASE_REG_REFERENCE);
+    InsertInstr(X86::VPORrr, TASE_REG_ACCUMULATOR)
+      .addReg(TASE_REG_ACCUMULATOR)
+      .addReg(TASE_REG_DATA);
+  } else {
+    InsertInstr(VPINSRrr[Log2(size)], TASE_REG_DATA)
+      .addReg(TASE_REG_DATA)
+      .addReg(getX86SubSuperRegister(CurrentMI->getOperand(0).getReg(), size * 8))
+      .addImm(2 * offset / size);
+  }
 }
 
 INITIALIZE_PASS(X86TASECaptureTaintPass, PASS_KEY, PASS_DESC, false, false)

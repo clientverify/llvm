@@ -10,8 +10,11 @@
 namespace llvm {
 
 /* Ordered by size. */
-static constexpr unsigned int VPINSR[] = {
+static constexpr unsigned int VPINSRrr[] = {
   X86::VPINSRBrr, X86::VPINSRWrr, X86::VPINSRDrr, X86::VPINSRQrr
+};
+static constexpr unsigned int VPINSRrm[] = {
+  X86::VPINSRBrm, X86::VPINSRWrm, X86::VPINSRDrm, X86::VPINSRQrm
 };
 
 static constexpr size_t Log2(size_t n) {
