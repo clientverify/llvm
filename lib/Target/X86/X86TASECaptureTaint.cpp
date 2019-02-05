@@ -329,6 +329,9 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
   // assert(size > 1 && "TASE: Ooops...  why are we checking 1 byte values?");
   if (size == 1) {
     // We can't handle byte values right now.
+    BuildMI(*CurrentMI->getParent(),
+      MachineBasicBlock::instr_iterator(CurrentMI),
+      CurrentMI->getDebugLoc(), TII->get(X86::NOOP));
     return;
   }
   uint8_t offset = AllocateOffset(size);
