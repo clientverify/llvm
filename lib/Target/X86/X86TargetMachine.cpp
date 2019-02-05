@@ -70,6 +70,7 @@ void initializeX86DomainReassignmentPass(PassRegistry &);
 void initializeX86AvoidSFBPassPass(PassRegistry &);
 void initializeX86SpeculativeLoadHardeningPassPass(PassRegistry &);
 void initializeX86FlagsCopyLoweringPassPass(PassRegistry &);
+void initializeX86TASEDecorateCartridgePassPass(PassRegistry &);
 void initializeX86TASECaptureTaintPassPass(PassRegistry &);
 void initializeX86TASEAddCartridgeSpringboardPassPass(PassRegistry &);
 
@@ -94,6 +95,7 @@ extern "C" void LLVMInitializeX86Target() {
   initializeX86AvoidSFBPassPass(PR);
   initializeX86SpeculativeLoadHardeningPassPass(PR);
   initializeX86FlagsCopyLoweringPassPass(PR);
+  initializeX86TASEDecorateCartridgePassPass(PR);
   initializeX86TASECaptureTaintPassPass(PR);
   initializeX86TASEAddCartridgeSpringboardPassPass(PR);
 }
@@ -525,6 +527,7 @@ void X86PassConfig::addPreEmitPass2() {
   if (!TT.isOSDarwin() && !TT.isOSWindows())
     addPass(createCFIInstrInserter());
 
+  addPass(createX86TASEDecorateCartridge());
   addPass(createX86TASECaptureTaint());
   addPass(createX86TASEAddCartridgeSpringboard());
 }
