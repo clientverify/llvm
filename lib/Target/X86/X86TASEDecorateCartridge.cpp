@@ -103,15 +103,15 @@ bool X86TASEDecorateCartridgePass::SplitToCartridges(MachineBasicBlock &MBB) {
   bool hasSplit = false;;
   bool hasInstr = false;
 
-  auto rEnd = MBB.rend();
-  for (auto rMI = MBB.rbegin(); rMI != rEnd; ++rMI) {
-    if (rMI->isDebugInstr()) {
+  // Do not cache MBB.rend - allow for reallocation.
+  for (auto rMII = MBB.instr_rbegin(); rMII != MBB.rend(); ++rMII) {
+    if (rMII->isDebugInstr()) {
       // Doesn't count as an actual instruction - these are usually tagged
       // onto a block and they are sensitive to control flow but since we
       // don't change control flow in a real sense, we just let them "stick"
       // to the closest real instruction.
       continue;
-    } else if (rMI->isCall()) {
+    } else if (rMII->isCall()) {
       // We need to break this basic block up - create a new one underneath
       // it but only if it contains any instructions.
       if (hasInstr) {
@@ -130,7 +130,10 @@ bool X86TASEDecorateCartridgePass::SplitToCartridges(MachineBasicBlock &MBB) {
         MF->insert(std::next(MachineFunction::iterator(MBB)), newMBB);
         // Copy instructions after the call into newMBB and remove them from
         // MBB.
-        newMBB->splice(newMBB->end(), &MBB, rMI.getReverse(), MBB.end());
+        auto MII = MachineBasicBlock::iterator(*rMII);
+        assert(MII->isCall() && "TASE: Bizarre iterator behavior.");
+        MII++;
+        newMBB->splice(newMBB->end(), &MBB, MII, MBB.end());
         hasSplit = true;
       } else {
         // Doesn't matter if we're in a termination sequence (I don't know
@@ -148,7 +151,7 @@ bool X86TASEDecorateCartridgePass::SplitToCartridges(MachineBasicBlock &MBB) {
       // block just has the new block as a successor.
       // So if we see a non-call terminator after we have split an MBB... we
       // flip the table and just split.
-      assert(!(rMI->isTerminator() && hasSplit) && "TASE: Encountered a call after a terminator instruction.");
+      assert(!(rMII->isTerminator() && hasSplit) && "TASE: Encountered a call after a terminator instruction.");
       // Just another instruction..
       hasInstr = true;
     }

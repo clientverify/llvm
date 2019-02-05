@@ -166,12 +166,6 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
             MI.getOpcode()) && "TASE: Encountered an instruction we haven't handled.");
       InstrumentInstruction(MI);
       modified = true;
-      // Calls begin a new cartridge.
-      // TODO: When cartridge identification is performed, use the pseudoinstruction
-      // for that to identify cartridge boundaries.
-      if (MI.isCall()) {
-        UsageMask = 0;
-      }
     }
   }
   return modified;
@@ -340,7 +334,8 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
   uint8_t offset = AllocateOffset(size);
 
   int addrOffset = X86II::getMemoryOperandNo(CurrentMI->getDesc().TSFlags);
-  assert(addrOffset && "TASE: Unable to determine instruction memory operand!");
+  // addrOffset is -1 if we failed to find the operand.
+  assert(addrOffset >= 0 && "TASE: Unable to determine instruction memory operand!");
   addrOffset += X86II::getOperandBias(CurrentMI->getDesc());
 
   // Stash our poison - use the given memory operands as our source.

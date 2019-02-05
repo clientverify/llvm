@@ -529,5 +529,5 @@ void X86PassConfig::addPreEmitPass2() {
 
   addPass(createX86TASEDecorateCartridge());
   addPass(createX86TASECaptureTaint());
-  addPass(createX86TASEAddCartridgeSpringboard());
+  //addPass(createX86TASEAddCartridgeSpringboard());
 }
