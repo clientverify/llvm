@@ -317,9 +317,9 @@ void X86TASECaptureTaintPass::PoisonCheckStack(int64_t stackOffset) {
   InsertInstr(VPINSRrm[Log2(stackAlignment)], TASE_REG_DATA)
     .addReg(TASE_REG_DATA)
     .addReg(X86::RSP)         // base
-    .addImm(1)                // scale
+    .addImm(0)                // scale
     .addReg(X86::NoRegister)  // index
-    .addImm(stackOffset)           // offset
+    .addImm(stackOffset)      // offset
     .addReg(X86::NoRegister)  // segment
     .addImm(2 * offset / stackAlignment);
   // TODO: Check if we need MIB.cloneMemRefs or MIB.addMemRefs.

@@ -31,6 +31,9 @@ static constexpr unsigned int TASE_REG_DATA = LLVM_XMM(REG_DATA);
 static constexpr unsigned int TASE_REG_STATUS = LLVM_XMM(REG_STATUS);
 static constexpr unsigned int TASE_REG_CONTEXT = LLVM_XMM(REG_CONTEXT);
 
+// We are worried about the lifetime of a few of our context variables.
+// Allocate them here explicitly - someone who knows more about LLVM MCContext
+// lifetimes can refactor this code as needed.
 extern const std::vector<std::string> &getTASEModeledFunctions();
 }
 

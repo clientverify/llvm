@@ -63,13 +63,11 @@ public:
 
 private:
   const X86Subtarget *Subtarget;
-//   MachineRegisterInfo *MRI;
   const X86InstrInfo *TII;
-//   const TargetRegisterInfo *TRI;
 
   const std::vector<std::string> &ModeledFunctions;
 
-  MCCartridgeRecord *emitSpringboard(MachineFunction &MF, MachineBasicBlock::instr_iterator MBBIFirstInstr, MachineBasicBlock::instr_iterator MBBILastInstr);
+  void EmitSpringboard(MachineBasicBlock &MBB);
 };
 
 } // end anonymous namespace
@@ -78,23 +76,31 @@ private:
 char X86TASEAddCartridgeSpringboardPass::ID = 0;
 
 
-MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::emitSpringboard(MachineFunction &MF, MachineBasicBlock::instr_iterator MBBIFirstInstr, MachineBasicBlock::instr_iterator MBBILastInstr) {
-  // We emit four labels per cartridge - the header, the cartridge descriptor, body and end.
-  // The cartridge body contains all instruction starting from and including FirstInstr and ending at and including LastInstr.
-  // This guarantees that every cartridge has at least one instruction in its body.
-  // Remember that for modeled functions, this implies that the native implementation must be non-empty and have at least one instruction.
-  MCCartridgeRecord *cartridge = MF.getContext().createCartridgeRecord();
-  MBBIFirstInstr->setPreInstrSymbol(MF, cartridge->Body);
-  MBBILastInstr->setPostInstrSymbol(MF, cartridge->End);
+void X86TASEAddCartridgeSpringboardPass::EmitSpringboard(MachineInstr &firstMI) {
+  // We run after cartridge splitting - this guarantees that each machine block
+  // has at least one instruction.  It also guarantees that every basic block
+  // is a cartridge.  So just add the BB to our record along with a label
+  // attached to the first instruction in the block.
+  MachineBasicBlock &MBB = firstMI.getParent();
+  MachineFunction &MF = MBB.getParent();
+  MCCartridgeRecord *cartridge = MF.getContext().createCartridgeRecord(MBB);
+  firstMI.setPreInstrSymbol(MF, cartridge->Body);
+  //MBBILastInstr->setPostInstrSymbol(MF, cartridge->End);
 
-  // Load the cartridge record for this block but don't overwrite the status flags.
-  /*
-  BuildMI(*(MBBIFirstInstr->getParent()), MBBIFirstInstr, MBBIFirstInstr->getDebugLoc(), TII->get(X86::VPBLENDWrmi), TASE_REG_CARTRIDGE)
-    .addReg(TASE_REG_STATUS)
-    .addSym(cartridge->Record)
-    .addImm((1 << (SB_FLAG_MODE_IDX / 2)) - 1)
-    ->setPreInstrSymbol(MF, cartridge->Header);
-  */
+  // TODO: If RAX is needed, stash it in REG_CONTEXT and recover it afterwards.
+  // Load the body address into rax.
+  BuildMI(MB, firstMI, firstMI.getDebugLoc(), TII->get(X86::LEA64r), X86::RAX)
+    .addReg(X86::RIP)         // base
+    .addImm(0)                // scale
+    .addReg(X86::NoRegister)  // index
+    .addSym(cartridge->Body)  // offset
+    .addReg(X86::NoRegister); // segment
+  BuildMI(MB, firstMI, firstMI.getDebugLoc(), TII->get(X86::JMP))
+    .addReg(X86::RIP)         // base
+    .addImm(0)                // scale
+    .addReg(X86::NoRegister)  // index
+    .addExternalSymbol("sb.reopen") // offset
+    .addReg(X86::NoRegister); // segment
   return cartridge;
 }
 
@@ -104,33 +110,21 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
                     << " **********\n");
   Subtarget = &MF.getSubtarget<X86Subtarget>();
   TII = Subtarget->getInstrInfo();
+  MachineInstr &firstMI = MF.front().front();
 
   if (std::binary_search(ModeledFunctions.begin(), ModeledFunctions.end(), MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Adding prolog to modeled function\n.");
-
-    MachineBasicBlock &MBB = MF.front();
-    MachineBasicBlock::instr_iterator MBBI = MBB.instr_begin();
-    emitSpringboard(MF, MBBI, MBBI);
-    // Request ejection in the header by merging the flag bits.
-    /*
-    BuildMI(MBB, MBBI, MBBI->getDebugLoc(), TII->get(X86::VPANDrm), TASE_REG_CARTRIDGE)
-      .addReg(TASE_REG_CARTRIDGE)
-      .addExternalSymbol("modeled_function_mask");*/
+    // Request ejection in the header by merging that flag bit.
+    BuildMI(MB, firstMI, firstMI.getDebugLoc(), TII->get(X86::XORrr), X86::RAX)
+      .addReg(X86::RAX);
+    BuildMI(MB, firstMI, firstMI.getDebugLoc(), TII->get(X86::VPINSR8rm), TASE_REG_STATUS)
+      .addReg(TASE_REG_STATUS)
+      .addReg(X86::RAX)
+      .addImm(SB_FLAG_TRAN_OUT);
+    EmitSpringboard(firstMI);
   } else {
     for (MachineBasicBlock &MBB : MF) {
-      MachineBasicBlock::instr_iterator MBBIStart = MBB.instr_begin();
-      for (MachineInstr &MI : MBB) {
-        // We consider call boundaries to be cartridge terminating instructions.
-        // If we encounter one, close the current cartridge and reopen.
-        if (MI.isCall()) {
-          MachineBasicBlock::instr_iterator MBBIEnd(MI);
-          emitSpringboard(MF, MBBIStart, MBBIEnd);
-          MBBIStart = std::next(MBBIEnd);
-        }
-      }
-      if (MBBIStart != MBB.instr_end()) {
-        emitSpringboard(MF, MBBIStart, MachineBasicBlock::instr_iterator(MBB.back()));
-      }
+      EmitSpringboard(MBB.front());
     }
   }
 

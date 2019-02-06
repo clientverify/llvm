@@ -18,6 +18,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/MC/MCAsmMacro.h"
 #include "llvm/MC/MCDwarf.h"
@@ -58,17 +59,17 @@ namespace llvm {
   class SourceMgr;
 
   /// TASE: We're being lazy and just defining a tuple of labels as a structure here.
+  /// This used to be more elaborate. We are using a simple structure for now
+  /// in case we need to export more detailed information about each cartridge.
   class MCCartridgeRecord {
   public:
     MCCartridgeRecord() = delete;
-    MCCartridgeRecord(MCSymbol *header, MCSymbol *record, MCSymbol *body, MCSymbol *end) :
-      Header(header), Record(record), Body(body), End(end) {}
+    MCCartridgeRecord(MachineBasicBlock *cartridge, MCSymbol *body):
+      Cartridge(cartridge), Body(body) {}
     ~MCCartridgeRecord() {}
 
-    MCSymbol *Header;
-    MCSymbol *Record;
+    MachineBasicBlock *Cartridge;
     MCSymbol *Body;
-    MCSymbol *End;
   };
 
   /// Context object for machine code objects.  This class owns all of the
@@ -363,7 +364,7 @@ namespace llvm {
 
     /// Create the symbols for a new cartridge. You will need to actually emit the
     /// symbols at the right place.
-    MCCartridgeRecord *createCartridgeRecord();
+    MCCartridgeRecord *createCartridgeRecord(MachineBasicBlock *MBB);
 
     /// All cartridge records accumulated so far.
     const std::vector<MCCartridgeRecord *> *getAllCartridgeRecords() const;
