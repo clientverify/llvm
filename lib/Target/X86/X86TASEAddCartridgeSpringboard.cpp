@@ -67,7 +67,7 @@ private:
 
   const std::vector<std::string> &ModeledFunctions;
 
-  void EmitSpringboard(MachineBasicBlock &MBB);
+  void EmitSpringboard(MachineInstr &firstMI);
 };
 
 } // end anonymous namespace
@@ -81,27 +81,26 @@ void X86TASEAddCartridgeSpringboardPass::EmitSpringboard(MachineInstr &firstMI) 
   // has at least one instruction.  It also guarantees that every basic block
   // is a cartridge.  So just add the BB to our record along with a label
   // attached to the first instruction in the block.
-  MachineBasicBlock &MBB = firstMI.getParent();
-  MachineFunction &MF = MBB.getParent();
-  MCCartridgeRecord *cartridge = MF.getContext().createCartridgeRecord(MBB);
-  firstMI.setPreInstrSymbol(MF, cartridge->Body);
+  MachineBasicBlock *MBB = firstMI.getParent();
+  MachineFunction *MF = MBB->getParent();
+  MCCartridgeRecord *cartridge = MF->getContext().createCartridgeRecord(MBB);
+  firstMI.setPreInstrSymbol(*MF, cartridge->Body);
   //MBBILastInstr->setPostInstrSymbol(MF, cartridge->End);
 
   // TODO: If RAX is needed, stash it in REG_CONTEXT and recover it afterwards.
   // Load the body address into rax.
-  BuildMI(MB, firstMI, firstMI.getDebugLoc(), TII->get(X86::LEA64r), X86::RAX)
+  BuildMI(*MBB, firstMI, firstMI.getDebugLoc(), TII->get(X86::LEA64r), X86::RAX)
     .addReg(X86::RIP)         // base
     .addImm(0)                // scale
     .addReg(X86::NoRegister)  // index
     .addSym(cartridge->Body)  // offset
     .addReg(X86::NoRegister); // segment
-  BuildMI(MB, firstMI, firstMI.getDebugLoc(), TII->get(X86::JMP))
+  BuildMI(*MBB, firstMI, firstMI.getDebugLoc(), TII->get(X86::JMP_1))
     .addReg(X86::RIP)         // base
     .addImm(0)                // scale
     .addReg(X86::NoRegister)  // index
     .addExternalSymbol("sb.reopen") // offset
     .addReg(X86::NoRegister); // segment
-  return cartridge;
 }
 
 
@@ -115,9 +114,9 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
   if (std::binary_search(ModeledFunctions.begin(), ModeledFunctions.end(), MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Adding prolog to modeled function\n.");
     // Request ejection in the header by merging that flag bit.
-    BuildMI(MB, firstMI, firstMI.getDebugLoc(), TII->get(X86::XORrr), X86::RAX)
+    BuildMI(MF.front(), firstMI, firstMI.getDebugLoc(), TII->get(X86::XOR64rr), X86::RAX)
       .addReg(X86::RAX);
-    BuildMI(MB, firstMI, firstMI.getDebugLoc(), TII->get(X86::VPINSR8rm), TASE_REG_STATUS)
+    BuildMI(MF.front(), firstMI, firstMI.getDebugLoc(), TII->get(X86::VPINSRBrr), TASE_REG_STATUS)
       .addReg(TASE_REG_STATUS)
       .addReg(X86::RAX)
       .addImm(SB_FLAG_TRAN_OUT);
