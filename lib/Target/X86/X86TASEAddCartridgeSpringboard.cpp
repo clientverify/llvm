@@ -84,10 +84,18 @@ void X86TASEAddCartridgeSpringboardPass::EmitSpringboard(MachineInstr &firstMI) 
   MachineBasicBlock *MBB = firstMI.getParent();
   MachineFunction *MF = MBB->getParent();
   MCCartridgeRecord *cartridge = MF->getContext().createCartridgeRecord(MBB);
-  firstMI.setPreInstrSymbol(*MF, cartridge->Body);
-  //MBBILastInstr->setPostInstrSymbol(MF, cartridge->End);
+  // MBBILastInstr->setPostInstrSymbol(MF, cartridge->End);
 
-  // TODO: If RAX is needed, stash it in REG_CONTEXT and recover it afterwards.
+  // TODO: Only emit the rax save-restore sequence if rax is live-in.
+  // Also....  who the heck comes up with these names?  VMOV64toPQIrr is just VMOVQ.
+  // TODO: If there are unused registers as determined by liveness analysis, move
+  // rax to that instead.  GPR renaming is much faster than loading into XMM regs.
+  //BuildMI(*MBB, firstMI, firstMI.getDebugLoc(), TII->get(X86::VMOV64toPQIrr), TASE_REG_CONTEXT)
+  //  .addReg(X86::RAX);
+  BuildMI(*MBB, firstMI, firstMI.getDebugLoc(), TII->get(X86::VPINSRQrr), TASE_REG_CONTEXT)
+    .addReg(TASE_REG_CONTEXT)
+    .addReg(X86::RAX)
+    .addImm(0);
   // Load the body address into rax.
   BuildMI(*MBB, firstMI, firstMI.getDebugLoc(), TII->get(X86::LEA64r), X86::RAX)
     .addReg(X86::RIP)         // base
@@ -96,11 +104,21 @@ void X86TASEAddCartridgeSpringboardPass::EmitSpringboard(MachineInstr &firstMI) 
     .addSym(cartridge->Body)  // offset
     .addReg(X86::NoRegister); // segment
   BuildMI(*MBB, firstMI, firstMI.getDebugLoc(), TII->get(X86::JMP_1))
-    .addReg(X86::RIP)         // base
-    .addImm(0)                // scale
-    .addReg(X86::NoRegister)  // index
-    .addExternalSymbol("sb.reopen") // offset
-    .addReg(X86::NoRegister); // segment
+    .addExternalSymbol("sb_reopen"); // JMP_1 encodes relative to RIP.
+  // If we add an rax recovery instruction, it becomes part of the cartridge body.
+  // TODO: Why is the failing?
+  //MachineInstr *recoveryMI = BuildMI(*MBB, firstMI, firstMI.getDebugLoc(),
+  //    TII->get(X86::VMOVPQIto64rr), X86::RAX)
+  //    .addReg(TASE_REG_CONTEXT);
+  // TODO: Checkout CopyToFromAsymmetricReg() in X86InstrInfo.cpp
+  MachineInstr *recoveryMI = BuildMI(*MBB, firstMI, firstMI.getDebugLoc(),
+      TII->get(X86::VPEXTRQrr))
+    .addReg(X86::RAX)
+    .addReg(TASE_REG_CONTEXT)
+    .addImm(0);
+
+  // TODO: Change this... if we don't insert recoveryMI, don't tag it.
+  recoveryMI->setPreInstrSymbol(*MF, cartridge->Body);
 }
 
 
@@ -109,16 +127,17 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
                     << " **********\n");
   Subtarget = &MF.getSubtarget<X86Subtarget>();
   TII = Subtarget->getInstrInfo();
-  MachineInstr &firstMI = MF.front().front();
+   MachineInstr &firstMI = MF.front().front();
 
   if (std::binary_search(ModeledFunctions.begin(), ModeledFunctions.end(), MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Adding prolog to modeled function\n.");
     // Request ejection in the header by merging that flag bit.
     BuildMI(MF.front(), firstMI, firstMI.getDebugLoc(), TII->get(X86::XOR64rr), X86::RAX)
+      .addReg(X86::RAX)
       .addReg(X86::RAX);
     BuildMI(MF.front(), firstMI, firstMI.getDebugLoc(), TII->get(X86::VPINSRBrr), TASE_REG_STATUS)
       .addReg(TASE_REG_STATUS)
-      .addReg(X86::RAX)
+      .addReg(X86::EAX)
       .addImm(SB_FLAG_TRAN_OUT);
     EmitSpringboard(firstMI);
   } else {
