@@ -321,8 +321,8 @@ void X86TASECaptureTaintPass::PoisonCheckStack(int64_t stackOffset) {
     .addReg(X86::NoRegister)  // index
     .addImm(stackOffset)      // offset
     .addReg(X86::NoRegister)  // segment
-    .addImm(2 * offset / stackAlignment);
-  // TODO: Check if we need MIB.cloneMemRefs or MIB.addMemRefs.
+    .addImm(2 * offset / stackAlignment)
+    .cloneMemRefs(*CurrentMI);
 }
 
 void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
@@ -342,6 +342,12 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
   addrOffset += X86II::getOperandBias(CurrentMI->getDesc());
 
   // Stash our poison - use the given memory operands as our source.
+  // We may get the mem_operands incorrect.  I believe we need to clear the
+  // MachineMemOperand::MOStore flag and set the MOLoad flag but we're late
+  // in the compilation process and mem_operands is mostly a hint anyway.
+  // It is always legal to have instructions with no mem_operands - the
+  // rest of the compiler should just deal with it extremely conservatively
+  // in terms of alignment and volatility.
   if (size == 16) {
     // We are guaranteed to have cleared the data register.  Directly compare into it.
     UsageMask = 0;
@@ -350,6 +356,7 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
     for (int i = 0; i < X86::AddrNumOperands; i++) {
       MIB.add(CurrentMI->getOperand(addrOffset + i));
     }
+    MIB.cloneMemRefs(*CurrentMI);
     InsertInstr(X86::VPORrr, TASE_REG_ACCUMULATOR)
       .addReg(TASE_REG_ACCUMULATOR)
       .addReg(TASE_REG_DATA);
@@ -359,8 +366,8 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
     for (int i = 0; i < X86::AddrNumOperands; i++) {
       MIB.add(CurrentMI->getOperand(addrOffset + i));
     }
-    MIB.addImm(2 * offset / size);
-    // TODO: Check if we need MIB.cloneMemRefs or MIB.addMemRefs.
+    MIB.addImm(2 * offset / size)
+      .cloneMemRefs(*CurrentMI);
   }
 }
 

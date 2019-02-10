@@ -106,11 +106,6 @@ void X86TASEAddCartridgeSpringboardPass::EmitSpringboard(MachineInstr &firstMI) 
   BuildMI(*MBB, firstMI, firstMI.getDebugLoc(), TII->get(X86::JMP_1))
     .addExternalSymbol("sb_reopen"); // JMP_1 encodes relative to RIP.
   // If we add an rax recovery instruction, it becomes part of the cartridge body.
-  // TODO: Why is the failing?
-  //MachineInstr *recoveryMI = BuildMI(*MBB, firstMI, firstMI.getDebugLoc(),
-  //    TII->get(X86::VMOVPQIto64rr), X86::RAX)
-  //    .addReg(TASE_REG_CONTEXT);
-  // TODO: Checkout CopyToFromAsymmetricReg() in X86InstrInfo.cpp
   MachineInstr *recoveryMI = BuildMI(*MBB, firstMI, firstMI.getDebugLoc(),
       TII->get(X86::VPEXTRQrr))
     .addReg(X86::RAX)

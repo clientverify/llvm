@@ -17,6 +17,7 @@
 #include "X86FrameLowering.h"
 #include "X86MachineFunctionInfo.h"
 #include "X86Subtarget.h"
+#include "X86TASE.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -573,6 +574,14 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
         Reserved.set(*AI);
     }
   }
+
+  // TASE: Reserve XMM registers.
+  for (unsigned n = XMMREG_RESERVED_START; n < XMMREG_RESERVED_START + NTASEXMMREG; ++n) {
+    for (MCRegAliasIterator AI(X86::XMM0 + n, this, true); AI.isValid(); ++AI) {
+      Reserved.set(*AI);
+    }
+  }
+
 
   assert(checkAllSuperRegsMarked(Reserved,
                                  {X86::SIL, X86::DIL, X86::BPL, X86::SPL,

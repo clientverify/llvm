@@ -136,8 +136,9 @@ MCSymbol *MCContext::getOrCreateSymbol(const Twine &Name) {
 
 MCCartridgeRecord *MCContext::createCartridgeRecord(MachineBasicBlock *MBB) {
   MCCartridgeRecord *record = new (*this) MCCartridgeRecord(
-      MBB, createTempSymbol("TASECartridgeBody", true, false));
+      MBB->getSymbol(), createTempSymbol("TASECartridgeBody", true, false));
   CartridgeRecords.push_back(record);
+  MBB->setHasAddressTaken();
   return record;
 }
 

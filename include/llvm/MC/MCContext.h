@@ -64,11 +64,11 @@ namespace llvm {
   class MCCartridgeRecord {
   public:
     MCCartridgeRecord() = delete;
-    MCCartridgeRecord(MachineBasicBlock *cartridge, MCSymbol *body):
+    MCCartridgeRecord(MCSymbol *cartridge, MCSymbol *body):
       Cartridge(cartridge), Body(body) {}
     ~MCCartridgeRecord() {}
 
-    MachineBasicBlock *Cartridge;
+    MCSymbol *Cartridge;
     MCSymbol *Body;
   };
 

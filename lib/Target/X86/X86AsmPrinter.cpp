@@ -691,8 +691,34 @@ void X86AsmPrinter::EmitEndOfAsmFile(Module &M) {
   if (TT.isOSBinFormatELF()) {
     SM.serializeToStackMapSection();
     FM.serializeToFaultMapSection();
+    EmitTASECartridgeRecords();
     return;
   }
+
+}
+
+void X86AsmPrinter::EmitTASECartridgeRecords() {
+  auto records = OutContext.getAllCartridgeRecords();
+  if (records->empty()) {
+    return;
+  }
+  MCSection *Cur = OutStreamer->getCurrentSectionOnly();
+  OutStreamer->SwitchSection(
+      OutContext.getELFSection(".rodata.tase_records", ELF::SHT_PROGBITS, 0));
+
+  OutStreamer->AddComment("Start of TASE Cartridge records");
+  OutStreamer->AddBlankLine();
+
+  for (MCCartridgeRecord *record : *records) {
+    OutStreamer->EmitSymbolValue(record->Cartridge, 8);
+    OutStreamer->EmitSymbolValue(record->Body, 8);
+    OutStreamer->AddBlankLine();
+  }
+
+  OutStreamer->AddComment("End of TASE Cartridge records");
+  OutStreamer->AddBlankLine();
+
+  OutStreamer->SwitchSection(Cur);
 }
 
 //===----------------------------------------------------------------------===//
