@@ -18,7 +18,6 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
-#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/MC/MCAsmMacro.h"
 #include "llvm/MC/MCDwarf.h"
@@ -364,7 +363,7 @@ namespace llvm {
 
     /// Create the symbols for a new cartridge. You will need to actually emit the
     /// symbols at the right place.
-    MCCartridgeRecord *createCartridgeRecord(MachineBasicBlock *MBB);
+    MCCartridgeRecord *createCartridgeRecord(MCSymbol *cartridge);
 
     /// All cartridge records accumulated so far.
     const std::vector<MCCartridgeRecord *> *getAllCartridgeRecords() const;

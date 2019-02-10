@@ -83,7 +83,8 @@ void X86TASEAddCartridgeSpringboardPass::EmitSpringboard(MachineInstr &firstMI) 
   // attached to the first instruction in the block.
   MachineBasicBlock *MBB = firstMI.getParent();
   MachineFunction *MF = MBB->getParent();
-  MCCartridgeRecord *cartridge = MF->getContext().createCartridgeRecord(MBB);
+  MCCartridgeRecord *cartridge = MF->getContext().createCartridgeRecord(MBB->getSymbol());
+  MBB->setHasAddressTaken();
   // MBBILastInstr->setPostInstrSymbol(MF, cartridge->End);
 
   // TODO: Only emit the rax save-restore sequence if rax is live-in.
