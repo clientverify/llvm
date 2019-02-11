@@ -710,8 +710,8 @@ void X86AsmPrinter::EmitTASECartridgeRecords() {
   OutStreamer->AddBlankLine();
 
   for (MCCartridgeRecord *record : *records) {
-    OutStreamer->EmitSymbolValue(record->Cartridge, 8);
-    OutStreamer->EmitSymbolValue(record->Body, 8);
+    OutStreamer->EmitSymbolValue(record->Cartridge, 4);
+    OutStreamer->EmitSymbolValue(record->Body, 4);
     OutStreamer->AddBlankLine();
   }
 
