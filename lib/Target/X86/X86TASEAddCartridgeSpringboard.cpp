@@ -67,7 +67,7 @@ private:
 
   const std::vector<std::string> &ModeledFunctions;
 
-  void EmitSpringboard(MachineInstr &firstMI);
+  MCCartridgeRecord *EmitSpringboard(MachineInstr &firstMI);
 };
 
 } // end anonymous namespace
@@ -76,7 +76,7 @@ private:
 char X86TASEAddCartridgeSpringboardPass::ID = 0;
 
 
-void X86TASEAddCartridgeSpringboardPass::EmitSpringboard(MachineInstr &firstMI) {
+MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard(MachineInstr &firstMI) {
   // We run after cartridge splitting - this guarantees that each machine block
   // has at least one instruction.  It also guarantees that every basic block
   // is a cartridge.  So just add the BB to our record along with a label
@@ -84,7 +84,6 @@ void X86TASEAddCartridgeSpringboardPass::EmitSpringboard(MachineInstr &firstMI) 
   MachineBasicBlock *MBB = firstMI.getParent();
   MachineFunction *MF = MBB->getParent();
   MCCartridgeRecord *cartridge = MF->getContext().createCartridgeRecord(MBB->getSymbol());
-  MBB->setHasAddressTaken();
   // MBBILastInstr->setPostInstrSymbol(MF, cartridge->End);
 
   // TODO: Only emit the rax save-restore sequence if rax is live-in.
@@ -115,6 +114,7 @@ void X86TASEAddCartridgeSpringboardPass::EmitSpringboard(MachineInstr &firstMI) 
 
   // TODO: Change this... if we don't insert recoveryMI, don't tag it.
   recoveryMI->setPreInstrSymbol(*MF, cartridge->Body);
+  return cartridge;
 }
 
 
@@ -123,11 +123,11 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
                     << " **********\n");
   Subtarget = &MF.getSubtarget<X86Subtarget>();
   TII = Subtarget->getInstrInfo();
-   MachineInstr &firstMI = MF.front().front();
 
   if (std::binary_search(ModeledFunctions.begin(), ModeledFunctions.end(), MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Adding prolog to modeled function\n.");
     // Request ejection in the header by merging that flag bit.
+    MachineInstr &firstMI = MF.front().front();
     BuildMI(MF.front(), firstMI, firstMI.getDebugLoc(), TII->get(X86::XOR64rr), X86::RAX)
       .addReg(X86::RAX)
       .addReg(X86::RAX);
@@ -135,10 +135,12 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
       .addReg(TASE_REG_STATUS)
       .addReg(X86::EAX)
       .addImm(SB_FLAG_TRAN_OUT);
-    EmitSpringboard(firstMI);
+    auto cartridge = EmitSpringboard(firstMI);
+    MF.front().front().setPreInstrSymbol(MF, cartridge->Cartridge);
   } else {
     for (MachineBasicBlock &MBB : MF) {
-      EmitSpringboard(MBB.front());
+      auto cartridge = EmitSpringboard(MBB.front());
+      MBB.front().setPreInstrSymbol(MF, cartridge->Cartridge);
     }
   }
 
