@@ -114,6 +114,7 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard(MachineIn
 
   // TODO: Change this... if we don't insert recoveryMI, don't tag it.
   recoveryMI->setPreInstrSymbol(*MF, cartridge->Body);
+  MBB->back().setPostInstrSymbol(*MF, cartridge->End);
   return cartridge;
 }
 

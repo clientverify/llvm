@@ -63,12 +63,13 @@ namespace llvm {
   class MCCartridgeRecord {
   public:
     MCCartridgeRecord() = delete;
-    MCCartridgeRecord(MCSymbol *cartridge, MCSymbol *body):
-      Cartridge(cartridge), Body(body) {}
+    MCCartridgeRecord(MCSymbol *cartridge, MCSymbol *body, MCSymbol *end):
+      Cartridge(cartridge), Body(body), End(end) {}
     ~MCCartridgeRecord() {}
 
     MCSymbol *Cartridge;
     MCSymbol *Body;
+    MCSymbol *End;
   };
 
   /// Context object for machine code objects.  This class owns all of the

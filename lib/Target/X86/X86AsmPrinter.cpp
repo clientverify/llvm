@@ -711,7 +711,8 @@ void X86AsmPrinter::EmitTASECartridgeRecords() {
 
   for (MCCartridgeRecord *record : *records) {
     OutStreamer->EmitSymbolValue(record->Cartridge, 4);
-    OutStreamer->EmitSymbolValue(record->Body, 4);
+    OutStreamer->emitAbsoluteSymbolDiff(record->Body, record->Cartridge, 2);
+    OutStreamer->emitAbsoluteSymbolDiff(record->End, record->Body, 2);
     OutStreamer->AddBlankLine();
   }
 
