@@ -326,20 +326,12 @@ void X86TASECaptureTaintPass::PoisonCheckStack(int64_t stackOffset) {
 }
 
 void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
-  // assert(size > 1 && "TASE: Ooops...  why are we checking 1 byte values?");
-  if (size == 1) {
-    // We can't handle byte values right now.
-    BuildMI(*CurrentMI->getParent(),
-      MachineBasicBlock::instr_iterator(CurrentMI),
-      CurrentMI->getDebugLoc(), TII->get(X86::NOOP));
-    return;
-  }
-  uint8_t offset = AllocateOffset(size);
-
   int addrOffset = X86II::getMemoryOperandNo(CurrentMI->getDesc().TSFlags);
   // addrOffset is -1 if we failed to find the operand.
   assert(addrOffset >= 0 && "TASE: Unable to determine instruction memory operand!");
   addrOffset += X86II::getOperandBias(CurrentMI->getDesc());
+
+  uint8_t offset = AllocateOffset(size == 1 ? 2 : size);
 
   // Stash our poison - use the given memory operands as our source.
   // We may get the mem_operands incorrect.  I believe we need to clear the
@@ -360,6 +352,25 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
     InsertInstr(X86::VPORrr, TASE_REG_ACCUMULATOR)
       .addReg(TASE_REG_ACCUMULATOR)
       .addReg(TASE_REG_DATA);
+  } else if (size == 1) {
+    MachineInstrBuilder MIB = InsertInstr(X86::LEA64r, X86::R15);
+    for (int i = 0; i < X86::AddrNumOperands; i++) {
+      MIB.add(CurrentMI->getOperand(addrOffset + i));
+    }
+    // Not going to need EFLAGS - so we can blow it away with
+    // AND
+    InsertInstr(X86::SHR64ri, X86::R15)
+      .addReg(X86::R15)
+      .addImm(1);
+    InsertInstr(X86::VPINSRWrm, TASE_REG_DATA)
+      .addReg(TASE_REG_DATA)
+      .addReg(X86::R15)         // base
+      .addImm(1)                // scale
+      .addReg(X86::R15)         // index
+      .addImm(0)                // offset
+      .addReg(X86::NoRegister)  // segment
+      .addImm(offset)           // 2 * offset / 2
+      .cloneMemRefs(*CurrentMI);
   } else {
     MachineInstrBuilder MIB = InsertInstr(VPINSRrm[Log2(size)], TASE_REG_DATA);
     MIB.addReg(TASE_REG_DATA);

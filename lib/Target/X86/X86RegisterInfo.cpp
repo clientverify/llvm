@@ -582,6 +582,11 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
     }
   }
 
+  // TASE OH FUCK IT JUST TAKE R15 for address checks until we figure out how
+  // to tell isel to not emit one-bute loads and force it to emit 2 byte loads instead.
+  for (MCSubRegIterator I(X86::R15, this, /*IncludeSelf=*/true); I.isValid(); ++I)
+    Reserved.set(*I);
+
 
   assert(checkAllSuperRegsMarked(Reserved,
                                  {X86::SIL, X86::DIL, X86::BPL, X86::SPL,
