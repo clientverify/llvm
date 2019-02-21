@@ -27,6 +27,7 @@
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
+#include "llvm/MC/MCCartridgeRecord.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -710,9 +711,9 @@ void X86AsmPrinter::EmitTASECartridgeRecords() {
   OutStreamer->AddBlankLine();
 
   for (MCCartridgeRecord *record : *records) {
-    OutStreamer->EmitSymbolValue(record->Cartridge, 4);
-    OutStreamer->emitAbsoluteSymbolDiff(record->Body, record->Cartridge, 2);
-    OutStreamer->emitAbsoluteSymbolDiff(record->End, record->Body, 2);
+    OutStreamer->EmitSymbolValue(record->Cartridge(), 4);
+    OutStreamer->emitAbsoluteSymbolDiff(record->Body(), record->Cartridge(), 2);
+    OutStreamer->emitAbsoluteSymbolDiff(record->End(), record->Body(), 2);
     OutStreamer->AddBlankLine();
   }
 

@@ -42,6 +42,7 @@ namespace llvm {
 
   class CodeViewContext;
   class MCAsmInfo;
+  class MCCartridgeRecord;
   class MCLabel;
   class MCObjectFileInfo;
   class MCRegisterInfo;
@@ -56,21 +57,6 @@ namespace llvm {
   class MCSymbolWasm;
   class SMLoc;
   class SourceMgr;
-
-  /// TASE: We're being lazy and just defining a tuple of labels as a structure here.
-  /// This used to be more elaborate. We are using a simple structure for now
-  /// in case we need to export more detailed information about each cartridge.
-  class MCCartridgeRecord {
-  public:
-    MCCartridgeRecord() = delete;
-    MCCartridgeRecord(MCSymbol *cartridge, MCSymbol *body, MCSymbol *end):
-      Cartridge(cartridge), Body(body), End(end) {}
-    ~MCCartridgeRecord() {}
-
-    MCSymbol *Cartridge;
-    MCSymbol *Body;
-    MCSymbol *End;
-  };
 
   /// Context object for machine code objects.  This class owns all of the
   /// sections that it creates.

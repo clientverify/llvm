@@ -17,6 +17,7 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/MC/MCCartridgeRecord.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
@@ -84,7 +85,6 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard(MachineIn
   MachineBasicBlock *MBB = firstMI.getParent();
   MachineFunction *MF = MBB->getParent();
   MCCartridgeRecord *cartridge = MF->getContext().createCartridgeRecord(MBB->getSymbol());
-  // MBBILastInstr->setPostInstrSymbol(MF, cartridge->End);
 
   // TODO: Only emit the rax save-restore sequence if rax is live-in.
   // Also....  who the heck comes up with these names?  VMOV64toPQIrr is just VMOVQ.
@@ -98,23 +98,39 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard(MachineIn
     .addImm(0);
   // Load the body address into rax.
   BuildMI(*MBB, firstMI, firstMI.getDebugLoc(), TII->get(X86::LEA64r), X86::RAX)
-    .addReg(X86::RIP)         // base
-    .addImm(0)                // scale
-    .addReg(X86::NoRegister)  // index
-    .addSym(cartridge->Body)  // offset
-    .addReg(X86::NoRegister); // segment
+    .addReg(X86::RIP)           // base
+    .addImm(0)                  // scale
+    .addReg(X86::NoRegister)    // index
+    .addSym(cartridge->Body())  // offset
+    .addReg(X86::NoRegister);   // segment
   BuildMI(*MBB, firstMI, firstMI.getDebugLoc(), TII->get(X86::JMP_1))
     .addExternalSymbol("sb_reopen"); // JMP_1 encodes relative to RIP.
+
   // If we add an rax recovery instruction, it becomes part of the cartridge body.
-  MachineInstr *recoveryMI = BuildMI(*MBB, firstMI, firstMI.getDebugLoc(),
-      TII->get(X86::VPEXTRQrr))
+  MachineInstr *cartridgeBodyPDMI = &firstMI;
+  cartridgeBodyPDMI =
+    BuildMI(*MBB, cartridgeBodyPDMI, cartridgeBodyPDMI->getDebugLoc(), TII->get(X86::VPEXTRQrr))
     .addReg(X86::RAX)
     .addReg(TASE_REG_CONTEXT)
     .addImm(0);
 
-  // TODO: Change this... if we don't insert recoveryMI, don't tag it.
-  recoveryMI->setPreInstrSymbol(*MF, cartridge->Body);
-  MBB->back().setPostInstrSymbol(*MF, cartridge->End);
+  // DEBUG: Assert that we are in an RTM transaction to check springboard behavior.
+  MachineInstr *cartridgeBodyMI =
+    BuildMI(*MBB, cartridgeBodyPDMI, cartridgeBodyPDMI->getDebugLoc(), TII->get(X86::XTEST));
+  BuildMI(*MBB, cartridgeBodyPDMI, cartridgeBodyPDMI->getDebugLoc(), TII->get(X86::JE_1))
+    .addSym(cartridge->BodyPostDebug());
+  BuildMI(*MBB, cartridgeBodyPDMI, cartridgeBodyPDMI->getDebugLoc(), TII->get(X86::MOV64rm))
+    .addReg(X86::RAX)
+    .addReg(X86::NoRegister)  // base
+    .addImm(0)                // scale
+    .addReg(X86::NoRegister)  // index
+    .addImm(0)                // offset
+    .addReg(X86::NoRegister); // segment
+
+  cartridgeBodyMI->setPreInstrSymbol(*MF, cartridge->Body());
+  cartridgeBodyPDMI->setPreInstrSymbol(*MF, cartridge->BodyPostDebug());
+
+  MBB->back().setPostInstrSymbol(*MF, cartridge->End());
   return cartridge;
 }
 
@@ -137,11 +153,11 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
       .addReg(X86::EAX)
       .addImm(SB_FLAG_TRAN_OUT);
     auto cartridge = EmitSpringboard(firstMI);
-    MF.front().front().setPreInstrSymbol(MF, cartridge->Cartridge);
+    MF.front().front().setPreInstrSymbol(MF, cartridge->Cartridge());
   } else {
     for (MachineBasicBlock &MBB : MF) {
       auto cartridge = EmitSpringboard(MBB.front());
-      MBB.front().setPreInstrSymbol(MF, cartridge->Cartridge);
+      MBB.front().setPreInstrSymbol(MF, cartridge->Cartridge());
     }
   }
 

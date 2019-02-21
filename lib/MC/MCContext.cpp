@@ -17,6 +17,7 @@
 #include "llvm/BinaryFormat/COFF.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCCartridgeRecord.h"
 #include "llvm/MC/MCCodeView.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCExpr.h"
@@ -135,10 +136,7 @@ MCSymbol *MCContext::getOrCreateSymbol(const Twine &Name) {
 }
 
 MCCartridgeRecord *MCContext::createCartridgeRecord(MCSymbol *cartridge) {
-  MCCartridgeRecord *record = new (*this) MCCartridgeRecord(
-      getOrCreateSymbol(cartridge->getName() + "_CartridgeHead"),
-      getOrCreateSymbol(cartridge->getName() + "_CartridgeBody"),
-      getOrCreateSymbol(cartridge->getName() + "_CartridgeEnd"));
+  MCCartridgeRecord *record = new (*this) MCCartridgeRecord(cartridge, this);
   CartridgeRecords.push_back(record);
   return record;
 }

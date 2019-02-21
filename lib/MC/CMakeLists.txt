@@ -10,6 +10,7 @@ add_llvm_library(LLVMMC
   MCAsmMacro.cpp
   MCAsmStreamer.cpp
   MCAssembler.cpp
+  MCCartridgeRecord.cpp
   MCCodeEmitter.cpp
   MCCodePadder.cpp
   MCCodeView.cpp
