@@ -377,21 +377,9 @@ def SSP : X86Reg<"ssp", 0>;
 // instruction requiring a REX prefix, while SIL, DIL, BPL, R8D, etc.
 // require a REX prefix. For example, "addb %ah, %dil" and "movzbl %ah, %r8d"
 // cannot be encoded.
-//
-// TASE: HAHA! Yeah we use RAX a lot - every TSX XBEGIN uses RAX when aborting.
-// So we actively de-prioritize it.  It's now only as  as important a
-// callee-save register. Further, we also de-prioritize R15. Yes, the encoding
-// length is longer but on average, we will heavily use R15 for the springboard
-// before we end up needing R12 and R13.
 def GR8 : RegisterClass<"X86", [i8],  8,
-                        (add CL, DL, CH, DH,               // i386+x64 caller save
-                             SIL, DIL,                     // i386 callee save, x64 caller save
-                             R8B, R9B, R10B, R11B,         // x64 caller save
-                             AL, AH,                       // TASE - last x64 caller save
-                             BL, BH,                       // i386+x64 callee save
-                             R14B, R12B, R13B,             // x64 callee save
-                             R15B,                         // TASE - last general x64 callee save
-                             BPL, SPL)> {                  // i386+x64 stack callee save
+                        (add AL, CL, DL, AH, CH, DH, BL, BH, SIL, DIL, BPL, SPL,
+                             R8B, R9B, R10B, R11B, R14B, R15B, R12B, R13B)> {
   let AltOrders = [(sub GR8, AH, BH, CH, DH)];
   let AltOrderSelect = [{
     return MF.getSubtarget<X86Subtarget>().is64Bit();
@@ -404,8 +392,8 @@ def GRH8 : RegisterClass<"X86", [i8],  8,
                               R12BH, R13BH, R14BH, R15BH)>;
 
 def GR16 : RegisterClass<"X86", [i16], 16,
-                         (add CX, DX, SI, DI, R8W, R9W, R10W, R11W, AX,
-                              BX, R14W, R12W, R13W, R15W, BP, SP)>;
+                         (add AX, CX, DX, SI, DI, BX, BP, SP,
+                              R8W, R9W, R10W, R11W, R14W, R15W, R12W, R13W)>;
 
 let isAllocatable = 0 in
 def GRH16 : RegisterClass<"X86", [i16], 16,
@@ -414,8 +402,8 @@ def GRH16 : RegisterClass<"X86", [i16], 16,
                                R15WH)>;
 
 def GR32 : RegisterClass<"X86", [i32], 32,
-                         (add ECX, EDX, ESI, EDI, R8D, R9D, R10D, R11D, EAX,
-                              EBX, R14D, R12D, R13D, R15D, EBP, ESP)>;
+                         (add EAX, ECX, EDX, ESI, EDI, EBX, EBP, ESP,
+                              R8D, R9D, R10D, R11D, R14D, R15D, R12D, R13D)>;
 
 // GR64 - 64-bit GPRs. This oddly includes RIP, which isn't accurate, since
 // RIP isn't really a register and it can't be used anywhere except in an
@@ -423,8 +411,8 @@ def GR32 : RegisterClass<"X86", [i32], 32,
 // FIXME: it *does* cause trouble - CheckBaseRegAndIndexReg() has extra
 // tests because of the inclusion of RIP in this register class.
 def GR64 : RegisterClass<"X86", [i64], 64,
-                         (add RCX, RDX, RSI, RDI, R8, R9, R10, R11, RAX,
-                              RBX, R14, R12, R13, R15, RBP, RSP, RIP)>;
+                         (add RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11,
+                              RBX, R14, R15, R12, R13, RBP, RSP, RIP)>;
 
 // Segment registers for use by MOV instructions (and others) that have a
 //   segment register as one operand.  Always contain a 16-bit segment
@@ -443,20 +431,20 @@ def CONTROL_REG : RegisterClass<"X86", [i64], 64, (sequence "CR%u", 0, 15)>;
 // that support 8-bit subreg operations. On x86-64, GR16_ABCD, GR32_ABCD,
 // and GR64_ABCD are classes for registers that support 8-bit h-register
 // operations.
-def GR8_ABCD_L : RegisterClass<"X86", [i8], 8, (add CL, DL, AL, BL)>;
-def GR8_ABCD_H : RegisterClass<"X86", [i8], 8, (add CH, DH, AH, BH)>;
-def GR16_ABCD : RegisterClass<"X86", [i16], 16, (add CX, DX, AX, BX)>;
-def GR32_ABCD : RegisterClass<"X86", [i32], 32, (add ECX, EDX, EAX, EBX)>;
-def GR64_ABCD : RegisterClass<"X86", [i64], 64, (add RCX, RDX, EAX, RBX)>;
-def GR32_TC   : RegisterClass<"X86", [i32], 32, (add ECX, EDX, EAX)>;
-def GR64_TC   : RegisterClass<"X86", [i64], 64, (add RCX, RDX, RSI, RDI,
-                                                     R8, R9, R11, RAX, RIP)>;
-def GR64_TCW64 : RegisterClass<"X86", [i64], 64, (add RCX, RDX,
-                                                      R8, R9, R10, R11, RAX, RIP)>;
+def GR8_ABCD_L : RegisterClass<"X86", [i8], 8, (add AL, CL, DL, BL)>;
+def GR8_ABCD_H : RegisterClass<"X86", [i8], 8, (add AH, CH, DH, BH)>;
+def GR16_ABCD : RegisterClass<"X86", [i16], 16, (add AX, CX, DX, BX)>;
+def GR32_ABCD : RegisterClass<"X86", [i32], 32, (add EAX, ECX, EDX, EBX)>;
+def GR64_ABCD : RegisterClass<"X86", [i64], 64, (add RAX, RCX, RDX, RBX)>;
+def GR32_TC   : RegisterClass<"X86", [i32], 32, (add EAX, ECX, EDX)>;
+def GR64_TC   : RegisterClass<"X86", [i64], 64, (add RAX, RCX, RDX, RSI, RDI,
+                                                     R8, R9, R11, RIP)>;
+def GR64_TCW64 : RegisterClass<"X86", [i64], 64, (add RAX, RCX, RDX,
+                                                      R8, R9, R10, R11, RIP)>;
 
 // GR8_NOREX - GR8 registers which do not require a REX prefix.
 def GR8_NOREX : RegisterClass<"X86", [i8], 8,
-                              (add CL, DL, CH, DH, AL, AH, BL, BH)> {
+                              (add AL, CL, DL, AH, CH, DH, BL, BH)> {
   let AltOrders = [(sub GR8_NOREX, AH, BH, CH, DH)];
   let AltOrderSelect = [{
     return MF.getSubtarget<X86Subtarget>().is64Bit();
@@ -464,13 +452,13 @@ def GR8_NOREX : RegisterClass<"X86", [i8], 8,
 }
 // GR16_NOREX - GR16 registers which do not require a REX prefix.
 def GR16_NOREX : RegisterClass<"X86", [i16], 16,
-                               (add CX, DX, SI, DI, AX, BX, BP, SP)>;
+                               (add AX, CX, DX, SI, DI, BX, BP, SP)>;
 // GR32_NOREX - GR32 registers which do not require a REX prefix.
 def GR32_NOREX : RegisterClass<"X86", [i32], 32,
-                               (add ECX, EDX, ESI, EDI, EAX, EBX, EBP, ESP)>;
+                               (add EAX, ECX, EDX, ESI, EDI, EBX, EBP, ESP)>;
 // GR64_NOREX - GR64 registers which do not require a REX prefix.
 def GR64_NOREX : RegisterClass<"X86", [i64], 64,
-                            (add RCX, RDX, RSI, RDI, RAX, RBX, RBP, RSP, RIP)>;
+                            (add RAX, RCX, RDX, RSI, RDI, RBX, RBP, RSP, RIP)>;
 
 // GR32_NOSP - GR32 registers except ESP.
 def GR32_NOSP : RegisterClass<"X86", [i32], 32, (sub GR32, ESP)>;
