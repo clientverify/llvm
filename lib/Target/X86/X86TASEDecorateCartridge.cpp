@@ -4,10 +4,6 @@
 //
 // We heavily lean on the code in Mips\MipsBranchExpansion.cpp to model
 // our splitting gymnastics.
-//
-// TODO: Investigate if marking call the CALL variants in X86InstrControl.td
-// as isTerminator=1 is sufficient to force the scheduler to do this break-up
-// pass automatically.
 
 #include "X86.h"
 #include "X86InstrBuilder.h"
@@ -44,8 +40,7 @@ namespace {
 
 class X86TASEDecorateCartridgePass : public MachineFunctionPass {
 public:
-  X86TASEDecorateCartridgePass() : MachineFunctionPass(ID),
-    ModeledFunctions(getTASEModeledFunctions()) {
+  X86TASEDecorateCartridgePass() : MachineFunctionPass(ID) {
     initializeX86TASEDecorateCartridgePassPass(
         *PassRegistry::getPassRegistry());
   }
@@ -67,10 +62,11 @@ public:
 private:
   const X86Subtarget *Subtarget;
   const X86InstrInfo *TII;
-  const std::vector<std::string> &ModeledFunctions;
+  TASEAnalysis Analysis;
 
-  bool SplitToCartridges(MachineBasicBlock &MBB);
-
+  bool SplitAtCalls(MachineBasicBlock &MBB);
+  bool SplitAtSpills(MachineBasicBlock &MBB);
+  MachineBasicBlock *SplitBefore(MachineBasicBlock *MBB, MachineBasicBlock::iterator MII);
 };
 
 } // end anonymous namespace
@@ -82,7 +78,7 @@ bool X86TASEDecorateCartridgePass::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "********** " << getPassName() << " : " << MF.getName()
                     << " **********\n");
 
-  if (std::binary_search(ModeledFunctions.begin(), ModeledFunctions.end(), MF.getName())) {
+  if (Analysis.isModeledFunction(MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Function is modeled in the interpreter\n.");
     return false;
   }
@@ -91,20 +87,29 @@ bool X86TASEDecorateCartridgePass::runOnMachineFunction(MachineFunction &MF) {
   TII = Subtarget->getInstrInfo();
 
   bool modified = false;
+
+  // Do reverse analysis to break blocks at call boundaries.
   for (MachineBasicBlock &MBB : MF) {
-    modified |= SplitToCartridges(MBB);
+    modified |= SplitAtCalls(MBB);
   }
+
+  // Do forward analysis to break blocks when taint accumulator registers
+  // need spilling.
+  for (MachineBasicBlock &MBB : MF) {
+    modified |= SplitAtSpills(MBB);
+  }
+
   // Make the blocks monotonic again.
   MF.RenumberBlocks();
   return modified;
 }
 
-bool X86TASEDecorateCartridgePass::SplitToCartridges(MachineBasicBlock &MBB) {
+bool X86TASEDecorateCartridgePass::SplitAtCalls(MachineBasicBlock &MBB) {
   bool hasSplit = false;;
   bool hasInstr = false;
 
   // Do not cache MBB.rend - allow for reallocation.
-  for (auto rMII = MBB.instr_rbegin(); rMII != MBB.rend(); ++rMII) {
+  for (auto rMII = MBB.instr_rbegin(); rMII != MBB.instr_rend(); ++rMII) {
     if (rMII->isDebugInstr()) {
       // Doesn't count as an actual instruction - these are usually tagged
       // onto a block and they are sensitive to control flow but since we
@@ -115,25 +120,12 @@ bool X86TASEDecorateCartridgePass::SplitToCartridges(MachineBasicBlock &MBB) {
       // We need to break this basic block up - create a new one underneath
       // it but only if it contains any instructions.
       if (hasInstr) {
-        // Make a new MBB that's parented to the same LLVM IR BB that our
-        // current BB (possibly partially) implements.  Remember that BB -> MBB
-        // is a one to many relation.
-        MachineFunction *MF = MBB.getParent();
-        MachineBasicBlock *newMBB = MF->CreateMachineBasicBlock(MBB.getBasicBlock());
-        // No phi nodes at this point - so no need to update them.
-        // Is there predecessor information?  Maybe that get's auto updated?
-        // *fingers crossed*
-        newMBB->transferSuccessors(&MBB);
-        MBB.addSuccessor(newMBB);
-        // Insert the new MBB after us in the machine function MBB chain.
-        // This will preserve locality and help renumber basic blocks correctly.
-        MF->insert(std::next(MachineFunction::iterator(MBB)), newMBB);
         // Copy instructions after the call into newMBB and remove them from
         // MBB.
         auto MII = MachineBasicBlock::iterator(*rMII);
         assert(MII->isCall() && "TASE: Bizarre iterator behavior.");
         MII++;
-        newMBB->splice(newMBB->end(), &MBB, MII, MBB.end());
+        SplitBefore(&MBB, MII);
         hasSplit = true;
       } else {
         // Doesn't matter if we're in a termination sequence (I don't know
@@ -159,6 +151,61 @@ bool X86TASEDecorateCartridgePass::SplitToCartridges(MachineBasicBlock &MBB) {
 
   assert(hasInstr && "TASE: Encountered an empty block!");
   return hasSplit;
+}
+
+bool X86TASEDecorateCartridgePass::SplitAtSpills(MachineBasicBlock &MBB) {
+  bool hasSplit = false;
+  MachineBasicBlock *CurrMBB = &MBB;
+
+  Analysis.ResetAccOffsets();
+  auto MII = CurrMBB->instr_begin();
+
+  while(MII != CurrMBB->instr_end()) {
+    unsigned int opcode = MII->getOpcode();
+    if (Analysis.isMemInstr(opcode)) {
+      size_t size = Analysis.getMemFootprint(opcode);
+      assert(size > 0);
+      size = (size == 1) ? 2 : size;
+      int idx = Analysis.AllocateAccOffset(size);
+      if (idx < 0) {
+        // This instruction made the taint tracker run out of accumulator
+        // registers. Copy it and everything after it into a new block.
+        // TODO: Does this orphan debug instructions?  Explore if we have
+        // bundles or implicitly attached debug instructions that need to be
+        // copied over.
+        CurrMBB = SplitBefore(CurrMBB, MachineBasicBlock::iterator(*MII));
+        Analysis.ResetAccOffsets();
+        MII = CurrMBB->instr_begin();
+        hasSplit = true;
+        // Rereun the accumulator analysis on the instruction in the new block.
+        continue;
+      }
+    }
+    ++MII;
+  }
+
+  return hasSplit;
+}
+
+MachineBasicBlock *X86TASEDecorateCartridgePass::SplitBefore(
+    MachineBasicBlock *MBB, MachineBasicBlock::iterator MII) {
+  // Make a new MBB that's parented to the same LLVM IR BB that our
+  // current BB (possibly partially) implements.  Remember that BB -> MBB
+  // is a one to many relation.
+  MachineFunction *MF = MBB->getParent();
+  MachineBasicBlock *newMBB = MF->CreateMachineBasicBlock(MBB->getBasicBlock());
+  // No phi nodes at this point - so no need to update them.
+  // Is there predecessor information?  Maybe that get's auto updated?
+  // *fingers crossed*
+  newMBB->transferSuccessors(MBB);
+  MBB->addSuccessor(newMBB);
+  // Insert the new MBB after us in the machine function MBB chain.
+  // This will preserve locality and help renumber basic blocks correctly.
+  MF->insert(std::next(MachineFunction::iterator(MBB)), newMBB);
+  // Move all instructions starting at MII (including MII) until the end of
+  // this MBB into the new MBB.
+  newMBB->splice(newMBB->end(), MBB, MII, MBB->end());
+  return newMBB;
 }
 
 INITIALIZE_PASS(X86TASEDecorateCartridgePass, PASS_KEY, PASS_DESC, false, false)
