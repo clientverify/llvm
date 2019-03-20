@@ -77,7 +77,7 @@ int TASEAnalysis::AllocateAccOffset(size_t bytes) {
   assert(bytes > 1 && "TASE: Cannot do single byte taint checks.");
 
   for (int i = 0; i< NUM_ACCUMULATORS; i++) {
-    if (AccumulatorBytes[i] + bytes < REG_SIZE) {
+    if (AccumulatorBytes[i] + bytes <= REG_SIZE) {
       AccumulatorBytes[i] += bytes;
       return i;
     }
@@ -106,7 +106,7 @@ size_t TASEAnalysis::getMemFootprint(unsigned int opcode) {
       return 0;
     case X86::RETQ:
     case X86::CALLpcrel16:
-    case X86::CALLpcrel32:
+    case X86::CALL64pcrel32:
     case X86::CALL64r:
     case X86::POP64r:
     case X86::PUSH64i8:
