@@ -108,7 +108,7 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard() {
     .addReg(X86::NoRegister)    // index
     .addSym(cartridge->Body())  // offset
     .addReg(X86::NoRegister);   // segment
-  // Indirectly jump to the sprinboard.
+  // Indirectly jump to the springboard.
   InsertInstr(X86::JMP64m)
     //.addReg(X86::RIP)         // base - TODO: double check the encoded lengths here.
     .addReg(X86::NoRegister)    // base
@@ -163,10 +163,9 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
     // Note: testing for sb_reopen should be conceptually considered as equal
     // to an xtest.
     FirstMI = &MF.front().front();
-    unsigned int acc4 = getX86SubSuperRegister(TASE_REG_ACC[0], 4 * 8);
-    InsertInstr(X86::XOR32rr, acc4)
-      .addReg(acc4)
-      .addReg(acc4);
+    unsigned int acc2 = getX86SubSuperRegister(TASE_REG_ACC[0], 2 * 8);
+    InsertInstr(X86::MOV16ri, acc2)
+      .addImm(POISON_REFERENCE16);
     // Exploit the fact that we are using a small code model and implicit
     // zero extension to shorten our instructions.
     InsertInstr(X86::CMP32mi)

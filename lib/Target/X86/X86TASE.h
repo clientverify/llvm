@@ -28,10 +28,10 @@ static constexpr unsigned int TASE_REG_ACC[] = {
 
 // Ordered by size.
 static constexpr unsigned int TASE_LOADrr[] = {
-  X86::XOR8rr, X86::XOR16rr, X86::XOR32rr, X86::XOR64rr
+  X86::MOV8rr, X86::MOV16rr, X86::MOV32rr, X86::MOV64rr
 };
 static constexpr unsigned int TASE_LOADrm[] = {
-  X86::XOR8rm, X86::XOR16rm, X86::XOR32rm, X86::XOR64rm
+  X86::MOV8rm, X86::MOV16rm, X86::MOV32rm, X86::MOV64rm
 };
 
 // We can actually autogenerate this but I have these here to double check my understanding
@@ -66,6 +66,7 @@ public:
   void ResetAccOffsets();
   bool isMemInstr(unsigned int opcode);
   size_t getMemFootprint(unsigned int opcode);
+  uint8_t getAccUsage(unsigned int offset) const;
 
 private:
   // Use C++11 trickery to extract the size of the array above at compile time.

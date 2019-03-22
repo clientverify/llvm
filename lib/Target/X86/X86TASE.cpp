@@ -86,6 +86,11 @@ int TASEAnalysis::AllocateAccOffset(size_t bytes) {
   return -1;
 }
 
+uint8_t TASEAnalysis::getAccUsage(unsigned int idx) const {
+  assert(idx < NUM_ACCUMULATORS);
+  return AccumulatorBytes[idx];
+}
+
 void TASEAnalysis::ResetAccOffsets() {
   std::fill(AccumulatorBytes, AccumulatorBytes + NUM_ACCUMULATORS, 0);
 }
