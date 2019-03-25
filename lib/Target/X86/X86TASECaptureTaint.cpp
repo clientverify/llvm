@@ -41,7 +41,8 @@ class X86TASECaptureTaintPass : public MachineFunctionPass {
 public:
   X86TASECaptureTaintPass() : MachineFunctionPass(ID),
     CurrentMI(nullptr),
-    NextMII(nullptr) {
+    NextMII(nullptr),
+    InsertBefore(true) {
     initializeX86TASECaptureTaintPassPass(
         *PassRegistry::getPassRegistry());
   }
@@ -67,13 +68,15 @@ private:
 //   const TargetRegisterInfo *TRI;
   MachineInstr *CurrentMI;
   MachineBasicBlock::instr_iterator NextMII;
+  bool InsertBefore;
 
   TASEAnalysis Analysis;
   void InstrumentInstruction(MachineInstr &MI);
-  MachineInstrBuilder InsertInstr(unsigned int opcode, unsigned int destReg, bool append = false);
-  void PoisonCheckReg(size_t size, unsigned int reg = X86::NoRegister, int acc_idx = -1);
+  MachineInstrBuilder InsertInstr(unsigned int opcode, unsigned int destReg);
+  void PoisonCheckReg(size_t size);
   void PoisonCheckStack(int64_t stackOffset);
   void PoisonCheckMem(size_t size);
+  void PoisonCheckRegInternal(size_t size, unsigned int reg, int acc_idx);
   void RotateAccumulator(size_t size, int acc_idx);
 };
 
@@ -201,10 +204,10 @@ void X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
   CurrentMI = nullptr;
 }
 
-MachineInstrBuilder X86TASECaptureTaintPass::InsertInstr(unsigned int opcode, unsigned int destReg, bool append) {
+MachineInstrBuilder X86TASECaptureTaintPass::InsertInstr(unsigned int opcode, unsigned int destReg) {
   assert(CurrentMI && "TASE: Must only be called in the context of of instrumenting an instruction.");
   return BuildMI(*CurrentMI->getParent(),
-      append ? NextMII : MachineBasicBlock::instr_iterator(CurrentMI),
+      InsertBefore ? MachineBasicBlock::instr_iterator(CurrentMI) : NextMII,
       CurrentMI->getDebugLoc(), TII->get(opcode), destReg);
 }
 
@@ -214,6 +217,7 @@ void X86TASECaptureTaintPass::PoisonCheckStack(int64_t stackOffset) {
 
   int acc_idx = Analysis.AllocateAccOffset(stackAlignment);
   assert(acc_idx >= 0);
+  InsertBefore = true;
   InsertInstr(TASE_LOADrm[cLog2(stackAlignment)], TASE_REG_ACC[acc_idx])
     .addReg(X86::RSP)         // base
     .addImm(0)                // scale
@@ -231,6 +235,7 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
   addrOffset += X86II::getOperandBias(CurrentMI->getDesc());
   int acc_idx = Analysis.AllocateAccOffset(size == 1 ? 2 : size);
   assert(acc_idx >= 0);
+  InsertBefore = true;
 
   // Stash our poison - use the given memory operands as our source.
   // We may get the mem_operands incorrect.  I believe we need to clear the
@@ -272,7 +277,7 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
       MIB.add(CurrentMI->getOperand(addrOffset + i));
     }
     MIB.cloneMemRefs(*CurrentMI);
-    PoisonCheckReg(size, TASE_REG_TMP, acc_idx);
+    PoisonCheckRegInternal(size, TASE_REG_TMP, acc_idx);
   } else {
     // size is 2 or 8
     MachineInstrBuilder MIB =
@@ -287,34 +292,35 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
 
 // Optimized fast-path case where we can simply check the value from a destination register.
 // Clobbers the bottom byte of the temporary register.
-void X86TASECaptureTaintPass::PoisonCheckReg(size_t size, unsigned int reg, int acc_idx) {
+void X86TASECaptureTaintPass::PoisonCheckReg(size_t size) {
   assert(size > 1 && "TASE: Cannot do a register-optimized poison check on byte value.");
-  if (acc_idx == -1) {
-    // Non recursive case - our accumulator was not pre-allocated.
-    acc_idx = Analysis.AllocateAccOffset(size);
-  }
+  int acc_idx = Analysis.AllocateAccOffset(size);
   assert(acc_idx >= 0);
-  if (reg == X86::NoRegister) {
-    reg = CurrentMI->getOperand(0).getReg();
-  }
-  reg = getX86SubSuperRegister(reg, size * 8);
+  InsertBefore = false;
+  PoisonCheckRegInternal(size, CurrentMI->getOperand(0).getReg(), acc_idx);
+}
 
+void X86TASECaptureTaintPass::PoisonCheckRegInternal(size_t size, unsigned int reg, int acc_idx) {
+  assert(size > 1 && "TASE: Cannot do a register-optimized poison check on byte value.");
+  assert(acc_idx >= 0);
+  assert(reg != X86::NoRegister);
+  reg = getX86SubSuperRegister(reg, size * 8);
   if (size == 16) {
     // TODO: Handle 16-byte SIMD case.
   } else if (size == 4 && Analysis.getAccUsage(acc_idx) >= 4) {
     // Cannot use a direct 32-bit move as that will zero out the top bits
     // of the 64-bit accumulator.  Instead, move 2 bytes at a time.
     // Note that PoisonCheckReg will clobber the bottom byte of the temporary register.
-    PoisonCheckReg(2, reg, acc_idx);
+    PoisonCheckRegInternal(2, reg, acc_idx);
     unsigned int tmp_reg = getX86SubSuperRegister(TASE_REG_TMP, size * 8);
     // Bottom byte of temporary should already have "16" loaded into it.
-    InsertInstr(X86::SHRX32rr, tmp_reg, true)
+    InsertInstr(X86::SHRX32rr, tmp_reg)
       .addReg(reg)
       .addReg(tmp_reg);
-    PoisonCheckReg(2, tmp_reg, acc_idx);
+    PoisonCheckRegInternal(2, tmp_reg, acc_idx);
   } else {
     // Exploit the fact that a zero extension is exactly what we need if size == 4.-
-    InsertInstr(TASE_LOADrr[cLog2(size)], getX86SubSuperRegister(TASE_REG_ACC[acc_idx], size * 8), true)
+    InsertInstr(TASE_LOADrr[cLog2(size)], getX86SubSuperRegister(TASE_REG_ACC[acc_idx], size * 8))
       .addReg(reg);
     RotateAccumulator(size, acc_idx);
   }
@@ -322,9 +328,9 @@ void X86TASECaptureTaintPass::PoisonCheckReg(size_t size, unsigned int reg, int 
 
 void X86TASECaptureTaintPass::RotateAccumulator(size_t size, int acc_idx) {
   if (size < 8) {
-    InsertInstr(X86::MOV8ri, getX86SubSuperRegister(TASE_REG_TMP, 8), true)
+    InsertInstr(X86::MOV8ri, getX86SubSuperRegister(TASE_REG_TMP, 8))
       .addImm(size * 8);
-    InsertInstr(X86::SHLX64rr, TASE_REG_ACC[acc_idx], true)
+    InsertInstr(X86::SHLX64rr, TASE_REG_ACC[acc_idx])
       .addReg(TASE_REG_ACC[acc_idx])
       .addReg(TASE_REG_TMP);
   }
