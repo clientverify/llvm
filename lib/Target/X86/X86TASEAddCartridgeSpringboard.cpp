@@ -101,21 +101,26 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard() {
   MachineFunction *MF = MBB->getParent();
   MCCartridgeRecord *cartridge = MF->getContext().createCartridgeRecord(MBB->getSymbol());
 
-  // Load the body address into GPR_RET.
-  InsertInstr(X86::LEA64r, TASE_REG_RET)
-    .addReg(X86::RIP)           // base - attempt to use the locality of cartridgeBody.
-    .addImm(0)                  // scale
-    .addReg(X86::NoRegister)    // index
-    .addSym(cartridge->Body())  // offset
-    .addReg(X86::NoRegister);   // segment
-  // Indirectly jump to the springboard.
-  InsertInstr(X86::JMP64m)
-    //.addReg(X86::RIP)         // base - TODO: double check the encoded lengths here.
-    .addReg(X86::NoRegister)    // base
-    .addImm(0)                  // scale
-    .addReg(X86::NoRegister)    // index
-    .addExternalSymbol("tase_springboard") // offset
-    .addReg(X86::NoRegister);   // segment
+  if (Analysis.getInstrumentationMode() == TIM_GPR) {
+    // Load the body address into GPR_RET.
+    InsertInstr(X86::LEA64r, TASE_REG_RET)
+      .addReg(X86::RIP)           // base - attempt to use the locality of cartridgeBody.
+      .addImm(0)                  // scale
+      .addReg(X86::NoRegister)    // index
+      .addSym(cartridge->Body())  // offset
+      .addReg(X86::NoRegister);   // segment
+    // Indirectly jump to the springboard.
+    InsertInstr(X86::JMP64m)
+      //.addReg(X86::RIP)         // base - TODO: double check the encoded lengths here.
+      .addReg(X86::NoRegister)    // base
+      .addImm(0)                  // scale
+      .addReg(X86::NoRegister)    // index
+      .addExternalSymbol("tase_springboard") // offset
+      .addReg(X86::NoRegister);   // segment
+  } else {
+    assert(Analysis.getInstrumentationMode() == TIM_SIMD);
+
+  }
 
   //MachineInstr *cartridgeBodyPDMI = &firstMI;
   // DEBUG: Assert that we are in an RTM transaction to check springboard behavior.
@@ -143,29 +148,22 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard() {
 bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "********** " << getPassName() << " : " << MF.getName()
                     << " **********\n");
+  if (Analysis.getInstrumentationMode() == TIM_NONE) {
+    return false;
+  }
+
   Subtarget = &MF.getSubtarget<X86Subtarget>();
   TII = Subtarget->getInstrInfo();
 
   if (Analysis.isModeledFunction(MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Adding prolog to modeled function\n.");
-    // We can do this more efficiently if we knew we were always going to be
-    // running in the final "production" mode.  We would check to see if the
-    // springboard is pointing to sb_disabled and if not, we would force an
-    // abort efficiently using a movl 0, %eax.  But under various debug
-    // scenarios, we might not actually be in a transaction but might still
-    // be calling sb_reopen.  To make it easier to handle those cases,
-    // we politely request ejection by clearing an accumulator and jumping to
-    // the springboard if it isn't pointing to sb_disabled.  We continue
-    // execution normally otherwise.  When we jump into sb_reopen, we assume
-    // that TASE_REG_RET has already been filled from the cartridge header
-    // springboard sequence and reuse it.
+    // To make our debug scenarios work well, we jump to sb_modeled (a helper)
+    // only if springboard is not disabled.  We assume TASE_REG_RET is already
+    // valid and pointing to the cartridge body.
     //
     // Note: testing for sb_reopen should be conceptually considered as equal
     // to an xtest.
     FirstMI = &MF.front().front();
-    unsigned int acc2 = getX86SubSuperRegister(TASE_REG_ACC[0], 2 * 8);
-    InsertInstr(X86::MOV16ri, acc2)
-      .addImm(POISON_REFERENCE16);
     // Exploit the fact that we are using a small code model and implicit
     // zero extension to shorten our instructions.
     InsertInstr(X86::CMP32mi)
@@ -174,9 +172,9 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
       .addReg(X86::NoRegister)    // index
       .addExternalSymbol("tase_springboard") // offset
       .addReg(X86::NoRegister)    // segment
-      .addExternalSymbol("sb_reopen");
-    InsertInstr(X86::JE_1)
-      .addExternalSymbol("sb_reopen");
+      .addExternalSymbol("sb_disabled");
+    InsertInstr(X86::JNE_1)
+      .addExternalSymbol("sb_modeled");
     FirstMI = &MF.front().front();
     EmitSpringboard();
   } else {

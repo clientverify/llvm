@@ -116,8 +116,10 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
       }
       assert(Analysis.isMemInstr(MI.getOpcode()) &&
           "TASE: Encountered an instruction we haven't handled.");
-      InstrumentInstruction(MI);
-      modified = true;
+      if (Analysis.getInstrumentationMode() != TIM_NONE) {
+        InstrumentInstruction(MI);
+        modified = true;
+      }
     }
   }
   return modified;
@@ -218,14 +220,18 @@ void X86TASECaptureTaintPass::PoisonCheckStack(int64_t stackOffset) {
   int acc_idx = Analysis.AllocateAccOffset(stackAlignment);
   assert(acc_idx >= 0);
   InsertBefore = true;
-  InsertInstr(TASE_LOADrm[cLog2(stackAlignment)], TASE_REG_ACC[acc_idx])
-    .addReg(X86::RSP)         // base
-    .addImm(0)                // scale
-    .addReg(X86::NoRegister)  // index
-    .addImm(stackOffset)      // offset
-    .addReg(X86::NoRegister)  // segment
-    .cloneMemRefs(*CurrentMI);
-  // No rotation needed - it's an 8 byte read.
+  if (Analysis.getInstrumentationMode() == TIM_GPR) {
+    InsertInstr(TASE_LOADrm[cLog2(stackAlignment)], TASE_REG_ACC[acc_idx])
+      .addReg(X86::RSP)         // base
+      .addImm(0)                // scale
+      .addReg(X86::NoRegister)  // index
+      .addImm(stackOffset)      // offset
+      .addReg(X86::NoRegister)  // segment
+      .cloneMemRefs(*CurrentMI);
+    // No rotation needed - it's an 8 byte read.
+  } else {
+    assert(Analysis.getInstrumentationMode() == TIM_SIMD);
+  }
 }
 
 void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
@@ -254,39 +260,47 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
     for (int i = 0; i < X86::AddrNumOperands; i++) {
       MIB.add(CurrentMI->getOperand(addrOffset + i));
     }
-    InsertInstr(X86::MOV8ri, getX86SubSuperRegister(TASE_REG_ACC[acc_idx], 8))
+    // Use TASE_REG_RET as a temporary register to hold offsets/indices.
+    InsertInstr(X86::MOV32ri, getX86SubSuperRegister(TASE_REG_RET, 8))
       .addImm(1);
     InsertInstr(X86::SHRX64rr, TASE_REG_TMP)
       .addReg(TASE_REG_TMP)
-      .addReg(TASE_REG_ACC[acc_idx]);
-    InsertInstr(TASE_LOADrm[cLog2(size)], getX86SubSuperRegister(TASE_REG_ACC[acc_idx], size * 8))
-      .addReg(TASE_REG_TMP)     // base
-      .addImm(1)                // scale
-      .addReg(TASE_REG_TMP)     // index
-      .addImm(0)                // offset
-      .addReg(X86::NoRegister)  // segment
-      .cloneMemRefs(*CurrentMI);
-    RotateAccumulator(size, acc_idx);
-  }
-  else if (size == 4 && Analysis.getAccUsage(acc_idx) > 4) {
-    // Cannot use a direct 32-bit load as that will zero out the top bits
-    // of the 64-bit accumulator.  Instead, load into temporary register
-    // and then move it into accumulator 2 bytes at a time.
-    MachineInstrBuilder MIB = InsertInstr(X86::MOV32rm, getX86SubSuperRegister(TASE_REG_TMP, size * 8));
-    for (int i = 0; i < X86::AddrNumOperands; i++) {
-      MIB.add(CurrentMI->getOperand(addrOffset + i));
+      .addReg(TASE_REG_RET);
+    if (Analysis.getInstrumentationMode() == TIM_GPR) {
+      InsertInstr(TASE_LOADrm[cLog2(size)], getX86SubSuperRegister(TASE_REG_ACC[acc_idx], size * 8))
+        .addReg(TASE_REG_TMP)     // base
+        .addImm(1)                // scale
+        .addReg(TASE_REG_TMP)     // index
+        .addImm(0)                // offset
+        .addReg(X86::NoRegister)  // segment
+        .cloneMemRefs(*CurrentMI);
+      RotateAccumulator(size, acc_idx);
+    } else {
+      assert(Analysis.getInstrumentationMode() == TIM_SIMD);
     }
-    MIB.cloneMemRefs(*CurrentMI);
-    PoisonCheckRegInternal(size, TASE_REG_TMP, acc_idx);
-  } else {
+  } else if (Analysis.getInstrumentationMode() == TIM_GPR) {
+    if (size == 4 && Analysis.getAccUsage(acc_idx) > 4) { 
+      // Cannot use a direct 32-bit load as that will zero out the top bits
+      // of the 64-bit accumulator.  Instead, load into temporary register
+      // and then move it into accumulator 2 bytes at a time.
+      MachineInstrBuilder MIB = InsertInstr(X86::MOV32rm, getX86SubSuperRegister(TASE_REG_TMP, size * 8));
+      for (int i = 0; i < X86::AddrNumOperands; i++) {
+        MIB.add(CurrentMI->getOperand(addrOffset + i));
+      }
+      MIB.cloneMemRefs(*CurrentMI);
+      PoisonCheckRegInternal(size, TASE_REG_TMP, acc_idx);
+    } else {
     // size is 2 or 8
-    MachineInstrBuilder MIB =
-      InsertInstr(TASE_LOADrm[cLog2(size)], getX86SubSuperRegister(TASE_REG_ACC[acc_idx], size * 8));
-    for (int i = 0; i < X86::AddrNumOperands; i++) {
-      MIB.add(CurrentMI->getOperand(addrOffset + i));
+      MachineInstrBuilder MIB =
+        InsertInstr(TASE_LOADrm[cLog2(size)], getX86SubSuperRegister(TASE_REG_ACC[acc_idx], size * 8));
+      for (int i = 0; i < X86::AddrNumOperands; i++) {
+        MIB.add(CurrentMI->getOperand(addrOffset + i));
+      }
+      MIB.cloneMemRefs(*CurrentMI);
+      RotateAccumulator(size, acc_idx);
     }
-    MIB.cloneMemRefs(*CurrentMI);
-    RotateAccumulator(size, acc_idx);
+  } else {
+    assert(Analysis.getInstrumentationMode() == TIM_SIMD);
   }
 }
 
@@ -307,32 +321,37 @@ void X86TASECaptureTaintPass::PoisonCheckRegInternal(size_t size, unsigned int r
   reg = getX86SubSuperRegister(reg, size * 8);
   if (size == 16) {
     // TODO: Handle 16-byte SIMD case.
-  } else if (size == 4 && Analysis.getAccUsage(acc_idx) >= 4) {
-    // Cannot use a direct 32-bit move as that will zero out the top bits
-    // of the 64-bit accumulator.  Instead, move 2 bytes at a time.
-    // Note that PoisonCheckReg will clobber the bottom byte of the temporary register.
-    PoisonCheckRegInternal(2, reg, acc_idx);
-    unsigned int tmp_reg = getX86SubSuperRegister(TASE_REG_TMP, size * 8);
-    // Bottom byte of temporary should already have "16" loaded into it.
-    InsertInstr(X86::SHRX32rr, tmp_reg)
-      .addReg(reg)
-      .addReg(tmp_reg);
-    PoisonCheckRegInternal(2, tmp_reg, acc_idx);
+  } else if (Analysis.getInstrumentationMode() == TIM_GPR) {
+    if (size == 4 && Analysis.getAccUsage(acc_idx) >= 4) {
+      // Cannot use a direct 32-bit move as that will zero out the top bits
+      // of the 64-bit accumulator.  Instead, move 2 bytes at a time.
+      // Note that PoisonCheckReg will clobber the bottom byte of the (unused)
+      // return register.
+      PoisonCheckRegInternal(2, reg, acc_idx);
+      unsigned int tmp_reg = getX86SubSuperRegister(TASE_REG_TMP, size * 8);
+      // Bottom byte of temporary should already have "16" loaded into it.
+      InsertInstr(X86::SHRX32rr, tmp_reg)
+        .addReg(reg)
+        .addReg(getX86SubSuperRegister(TASE_REG_RET, size * 8));
+      PoisonCheckRegInternal(2, tmp_reg, acc_idx);
+    } else {
+      // Exploit the fact that a zero extension is exactly what we need if size == 4.-
+      InsertInstr(TASE_LOADrr[cLog2(size)], getX86SubSuperRegister(TASE_REG_ACC[acc_idx], size * 8))
+        .addReg(reg);
+      RotateAccumulator(size, acc_idx);
+    }
   } else {
-    // Exploit the fact that a zero extension is exactly what we need if size == 4.-
-    InsertInstr(TASE_LOADrr[cLog2(size)], getX86SubSuperRegister(TASE_REG_ACC[acc_idx], size * 8))
-      .addReg(reg);
-    RotateAccumulator(size, acc_idx);
+    assert(Analysis.getInstrumentationMode() == TIM_SIMD);
   }
 }
 
 void X86TASECaptureTaintPass::RotateAccumulator(size_t size, int acc_idx) {
   if (size < 8) {
-    InsertInstr(X86::MOV8ri, getX86SubSuperRegister(TASE_REG_TMP, 8))
+    InsertInstr(X86::MOV8ri, getX86SubSuperRegister(TASE_REG_RET, 8))
       .addImm(size * 8);
     InsertInstr(X86::SHLX64rr, TASE_REG_ACC[acc_idx])
       .addReg(TASE_REG_ACC[acc_idx])
-      .addReg(TASE_REG_TMP);
+      .addReg(TASE_REG_RET);
   }
 }
 

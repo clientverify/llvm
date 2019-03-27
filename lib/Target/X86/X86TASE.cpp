@@ -19,6 +19,17 @@ static cl::opt<std::string, true> TASEModeledFunctionsFlag(
     cl::location(TASEModeledFunctionsFile),
     cl::ValueRequired);
 
+TASEInstMode TASEInstrumentationMode;
+static cl::opt<TASEInstMode, true> TASEInstrumentationModeFlag(
+    "x86-tase-instrumentation-mode",
+    cl::desc("Choose the tain tracking instrumentation kind."),
+    cl::values(
+      clEnumValN(TIM_NONE, "none", "No TASE taint tracking"),
+      clEnumValN(TIM_GPR, "gpr", "GPR based TASE taint tracking"),
+      clEnumValN(TIM_SIMD, "simd", "SIMD based TASE taint tracking")),
+    cl::location(TASEInstrumentationMode),
+    cl::init(TIM_GPR));
+
 namespace llvm {
 
 bool TASEAnalysis::uncachedModeledFunctions(true);
@@ -56,6 +67,10 @@ void TASEAnalysis::initMemInstrs() {
   assert(uncachedMemInstrs);
   std::sort(MemInstrs.begin(), MemInstrs.end());
   uncachedMemInstrs = false;
+}
+
+TASEInstMode TASEAnalysis::getInstrumentationMode() {
+  return TASEInstrumentationMode;
 }
 
 

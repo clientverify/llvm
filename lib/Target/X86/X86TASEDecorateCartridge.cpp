@@ -88,19 +88,23 @@ bool X86TASEDecorateCartridgePass::runOnMachineFunction(MachineFunction &MF) {
 
   bool modified = false;
 
-  // Do reverse analysis to break blocks at call boundaries.
-  for (MachineBasicBlock &MBB : MF) {
-    modified |= SplitAtCalls(MBB);
-  }
+  if (Analysis.getInstrumentationMode() != TIM_NONE) {
+    // Do reverse analysis to break blocks at call boundaries.
+    for (MachineBasicBlock &MBB : MF) {
+      modified |= SplitAtCalls(MBB);
+    }
 
-  // Do forward analysis to break blocks when taint accumulator registers
-  // need spilling.
-  for (MachineBasicBlock &MBB : MF) {
-    modified |= SplitAtSpills(MBB);
-  }
+    if (Analysis.getInstrumentationMode() == TIM_GPR) {
+      // Do forward analysis to break blocks when taint accumulator registers
+      // need spilling.
+      for (MachineBasicBlock &MBB : MF) {
+        modified |= SplitAtSpills(MBB);
+      }
+    }
 
-  // Make the blocks monotonic again.
-  MF.RenumberBlocks();
+    // Make the blocks monotonic again.
+    MF.RenumberBlocks();
+  }
   return modified;
 }
 

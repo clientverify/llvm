@@ -7,6 +7,10 @@
 #include "X86.h"
 #include "X86InstrInfo.h"
 
+enum TASEInstMode {
+  TIM_NONE, TIM_GPR, TIM_SIMD
+};
+
 namespace llvm {
 
 // Utility functionality.
@@ -67,6 +71,8 @@ public:
   bool isMemInstr(unsigned int opcode);
   size_t getMemFootprint(unsigned int opcode);
   uint8_t getAccUsage(unsigned int offset) const;
+
+  static TASEInstMode getInstrumentationMode();
 
 private:
   // Use C++11 trickery to extract the size of the array above at compile time.
