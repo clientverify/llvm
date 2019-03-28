@@ -74,9 +74,9 @@ TASEInstMode TASEAnalysis::getInstrumentationMode() {
 }
 
 
-
 TASEAnalysis::TASEAnalysis() {
   ResetAccOffsets();
+  ResetDataOffsets();
 }
 
 bool TASEAnalysis::isModeledFunction(StringRef name) {
@@ -84,30 +84,6 @@ bool TASEAnalysis::isModeledFunction(StringRef name) {
     initModeledFunctions();
   }
   return std::binary_search(ModeledFunctions.begin(), ModeledFunctions.end(), name);
-}
-
-int TASEAnalysis::AllocateAccOffset(size_t bytes) {
-  assert(bytes && " TASE: Cannot instrument instruction with unknown operand bytes.");
-  assert(bytes <= REG_SIZE && "TASE: Cannot currently handle SIMD values or larger.");
-  assert(bytes > 1 && "TASE: Cannot do single byte taint checks.");
-
-  for (int i = 0; i< NUM_ACCUMULATORS; i++) {
-    if (AccumulatorBytes[i] + bytes <= REG_SIZE) {
-      AccumulatorBytes[i] += bytes;
-      return i;
-    }
-  }
-  /* Only got here if we weren't able to find a slot.  TO THE SPRINGBOARD!!!*/
-  return -1;
-}
-
-uint8_t TASEAnalysis::getAccUsage(unsigned int idx) const {
-  assert(idx < NUM_ACCUMULATORS);
-  return AccumulatorBytes[idx];
-}
-
-void TASEAnalysis::ResetAccOffsets() {
-  std::fill(AccumulatorBytes, AccumulatorBytes + NUM_ACCUMULATORS, 0);
 }
 
 bool TASEAnalysis::isMemInstr(unsigned int opcode) {
@@ -168,6 +144,71 @@ size_t TASEAnalysis::getMemFootprint(unsigned int opcode) {
       return 8;
   }
   llvm_unreachable("TASE: How is this even possible?");
+}
+
+
+/* -- GPR ------------------------------------------------------------------- */
+int TASEAnalysis::AllocateAccOffset(size_t bytes) {
+  assert(bytes && " TASE: Cannot instrument instruction with unknown operand bytes.");
+  assert(bytes <= REG_SIZE && "TASE: Cannot currently handle SIMD values or larger.");
+  assert(bytes > 1 && "TASE: Cannot do single byte taint checks.");
+
+  for (int i = 0; i < static_cast<int>(NUM_ACCUMULATORS); i++) {
+    if (AccumulatorBytes[i] + bytes <= REG_SIZE) {
+      AccumulatorBytes[i] += bytes;
+      return i;
+    }
+  }
+  /* Only got here if we weren't able to find a slot.  TO THE SPRINGBOARD!!!*/
+  return -1;
+}
+
+void TASEAnalysis::ResetAccOffsets() {
+  std::fill(AccumulatorBytes, AccumulatorBytes + NUM_ACCUMULATORS, 0);
+}
+
+uint8_t TASEAnalysis::getAccUsage(unsigned int idx) const {
+  assert(idx < NUM_ACCUMULATORS);
+  return AccumulatorBytes[idx];
+}
+
+/* -- SIMD ------------------------------------------------------------------ */
+int TASEAnalysis::AllocateDataOffset(size_t bytes) {
+  assert(bytes && " TASE: Cannot instrument instruction with unknown operand bytes.");
+  assert(bytes <= REG_SIZE && "TASE: Cannot currently handle SIMD values or larger.");
+  assert(bytes > 1 && "TASE: Cannot do single byte taint checks.");
+
+  // We want a word offset.
+  // Examples:
+  // If we are storing a 4 byte int...
+  //    bytes = 4
+  // => stride = 2
+  // => mask = (1 << 2) - 1 = 3 = 0b11.
+  // The above makes sense because the mask (0b11) indicates 2 words (2x2 byte values).
+  // => offset in [0, 2, 4, 6]
+  // => offset/stride in [0, 1, 2, 3]
+  uint8_t stride = bytes / POISON_SIZE;
+  uint8_t mask = (1 << stride) - 1;
+  uint8_t offset = 0;
+  // The < 8  here is sizeof(xmm)/2.
+  for (; offset < XMMREG_SIZE / POISON_SIZE; offset += stride) {
+    if ((DataUsageMask & (mask << offset)) == 0) {
+      break;
+    }
+  }
+
+  // Compare and reload.
+  if (offset >= XMMREG_SIZE / POISON_SIZE) {
+    return -1;
+  } else {
+    // Mark the new words as being used.
+    DataUsageMask |= mask << offset;
+    return offset * POISON_SIZE;
+  }
+}
+
+void TASEAnalysis::ResetDataOffsets() {
+  DataUsageMask = 0;
 }
 
 }  // namespace llvm

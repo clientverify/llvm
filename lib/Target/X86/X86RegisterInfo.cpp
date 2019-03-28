@@ -575,6 +575,7 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
     }
   }
 
+  TASEAnalysis analysis;
   // TASE: Reserve accumulator and temp registers.
   for (MCRegAliasIterator AI(TASE_REG_TMP, this, true); AI.isValid(); ++AI) {
     Reserved.set(*AI);
@@ -582,8 +583,22 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   for (MCRegAliasIterator AI(TASE_REG_RET, this, true); AI.isValid(); ++AI) {
     Reserved.set(*AI);
   }
-  for (unsigned n = 0; n < NUM_ACCUMULATORS; ++n) {
-    for (MCRegAliasIterator AI(TASE_REG_ACC[n], this, true); AI.isValid(); ++AI) {
+
+  if (analysis.getInstrumentationMode() == TIM_GPR) {
+    // Only for GPR mode - TODO: Only do this if the flag is set
+    for (unsigned n = 0; n < NUM_ACCUMULATORS; ++n) {
+      for (MCRegAliasIterator AI(TASE_REG_ACC[n], this, true); AI.isValid(); ++AI) {
+        Reserved.set(*AI);
+      }
+    }
+  } else if (analysis.getInstrumentationMode() == TIM_SIMD) {
+    for (MCRegAliasIterator AI(TASE_REG_ACCUMULATOR, this, true); AI.isValid(); ++AI) {
+      Reserved.set(*AI);
+    }
+    for (MCRegAliasIterator AI(TASE_REG_REFERENCE, this, true); AI.isValid(); ++AI) {
+      Reserved.set(*AI);
+    }
+    for (MCRegAliasIterator AI(TASE_REG_DATA, this, true); AI.isValid(); ++AI) {
       Reserved.set(*AI);
     }
   }

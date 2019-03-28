@@ -101,26 +101,21 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard() {
   MachineFunction *MF = MBB->getParent();
   MCCartridgeRecord *cartridge = MF->getContext().createCartridgeRecord(MBB->getSymbol());
 
-  if (Analysis.getInstrumentationMode() == TIM_GPR) {
-    // Load the body address into GPR_RET.
-    InsertInstr(X86::LEA64r, TASE_REG_RET)
-      .addReg(X86::RIP)           // base - attempt to use the locality of cartridgeBody.
-      .addImm(0)                  // scale
-      .addReg(X86::NoRegister)    // index
-      .addSym(cartridge->Body())  // offset
-      .addReg(X86::NoRegister);   // segment
-    // Indirectly jump to the springboard.
-    InsertInstr(X86::JMP64m)
-      //.addReg(X86::RIP)         // base - TODO: double check the encoded lengths here.
-      .addReg(X86::NoRegister)    // base
-      .addImm(0)                  // scale
-      .addReg(X86::NoRegister)    // index
-      .addExternalSymbol("tase_springboard") // offset
-      .addReg(X86::NoRegister);   // segment
-  } else {
-    assert(Analysis.getInstrumentationMode() == TIM_SIMD);
-
-  }
+  // Load the body address into GPR_RET.
+  InsertInstr(X86::LEA64r, TASE_REG_RET)
+    .addReg(X86::RIP)           // base - attempt to use the locality of cartridgeBody.
+    .addImm(0)                  // scale
+    .addReg(X86::NoRegister)    // index
+    .addSym(cartridge->Body())  // offset
+    .addReg(X86::NoRegister);   // segment
+  // Indirectly jump to the springboard.
+  InsertInstr(X86::JMP64m)
+    //.addReg(X86::RIP)         // base - TODO: double check the encoded lengths here.
+    .addReg(X86::NoRegister)    // base
+    .addImm(0)                  // scale
+    .addReg(X86::NoRegister)    // index
+    .addExternalSymbol("tase_springboard") // offset
+    .addReg(X86::NoRegister);   // segment
 
   //MachineInstr *cartridgeBodyPDMI = &firstMI;
   // DEBUG: Assert that we are in an RTM transaction to check springboard behavior.

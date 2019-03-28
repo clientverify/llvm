@@ -76,8 +76,9 @@ private:
   void PoisonCheckReg(size_t size);
   void PoisonCheckStack(int64_t stackOffset);
   void PoisonCheckMem(size_t size);
-  void PoisonCheckRegInternal(size_t size, unsigned int reg, int acc_idx);
-  void RotateAccumulator(size_t size, int acc_idx);
+  void PoisonCheckRegInternal(size_t size, unsigned int reg, unsigned int acc_idx);
+  void RotateAccumulator(size_t size, unsigned int acc_idx);
+  unsigned int AllocateOffset(size_t size);
 };
 
 } // end anonymous namespace
@@ -103,6 +104,7 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
   for (MachineBasicBlock &MBB : MF) {
     // Every cartridge entry sequence is going to flush the accumulators.
     Analysis.ResetAccOffsets();
+    Analysis.ResetDataOffsets();
     // In using this range, we use the super special property that a machine
     // instruction list obeys the iterator characteristics of list<
     // undocumented property that instr_iterator is not invalidated when
@@ -214,12 +216,11 @@ MachineInstrBuilder X86TASECaptureTaintPass::InsertInstr(unsigned int opcode, un
 }
 
 void X86TASECaptureTaintPass::PoisonCheckStack(int64_t stackOffset) {
+  InsertBefore = true;
   const size_t stackAlignment = 8;
   assert(stackOffset % stackAlignment == 0 && "TASE: Unaligned offset into the stack - must be multiple of 8");
+  unsigned int acc_idx = AllocateOffset(stackAlignment);
 
-  int acc_idx = Analysis.AllocateAccOffset(stackAlignment);
-  assert(acc_idx >= 0);
-  InsertBefore = true;
   if (Analysis.getInstrumentationMode() == TIM_GPR) {
     InsertInstr(TASE_LOADrm[cLog2(stackAlignment)], TASE_REG_ACC[acc_idx])
       .addReg(X86::RSP)         // base
@@ -231,17 +232,25 @@ void X86TASECaptureTaintPass::PoisonCheckStack(int64_t stackOffset) {
     // No rotation needed - it's an 8 byte read.
   } else {
     assert(Analysis.getInstrumentationMode() == TIM_SIMD);
+    InsertInstr(TASE_VPINSRrm[cLog2(stackAlignment)], TASE_REG_DATA)
+      .addReg(TASE_REG_DATA)
+      .addReg(X86::RSP)         // base
+      .addImm(0)                // scale
+      .addReg(X86::NoRegister)  // index
+      .addImm(stackOffset)      // offset
+      .addReg(X86::NoRegister)  // segment
+      .addImm(acc_idx / stackAlignment)
+      .cloneMemRefs(*CurrentMI);
   }
 }
 
 void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
+  InsertBefore = true;
   int addrOffset = X86II::getMemoryOperandNo(CurrentMI->getDesc().TSFlags);
   // addrOffset is -1 if we failed to find the operand.
   assert(addrOffset >= 0 && "TASE: Unable to determine instruction memory operand!");
   addrOffset += X86II::getOperandBias(CurrentMI->getDesc());
-  int acc_idx = Analysis.AllocateAccOffset(size == 1 ? 2 : size);
-  assert(acc_idx >= 0);
-  InsertBefore = true;
+  unsigned int acc_idx = AllocateOffset(size == 1 ? 2 : size);
 
   // Stash our poison - use the given memory operands as our source.
   // We may get the mem_operands incorrect.  I believe we need to clear the
@@ -261,7 +270,8 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
       MIB.add(CurrentMI->getOperand(addrOffset + i));
     }
     // Use TASE_REG_RET as a temporary register to hold offsets/indices.
-    InsertInstr(X86::MOV32ri, getX86SubSuperRegister(TASE_REG_RET, 8))
+    // TODO: If we can establish that EFLAGS is dead, we can use a shorter SHR.
+    InsertInstr(X86::MOV32ri, getX86SubSuperRegister(TASE_REG_RET, 4 * 8))
       .addImm(1);
     InsertInstr(X86::SHRX64rr, TASE_REG_TMP)
       .addReg(TASE_REG_TMP)
@@ -277,6 +287,15 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
       RotateAccumulator(size, acc_idx);
     } else {
       assert(Analysis.getInstrumentationMode() == TIM_SIMD);
+      InsertInstr(TASE_VPINSRrm[cLog2(size)], TASE_REG_DATA)
+        .addReg(TASE_REG_DATA)
+        .addReg(TASE_REG_TMP)     // base
+        .addImm(1)                // scale
+        .addReg(TASE_REG_TMP)     // index
+        .addImm(0)                // offset
+        .addReg(X86::NoRegister)  // segment
+        .addImm(acc_idx / size)
+        .cloneMemRefs(*CurrentMI);
     }
   } else if (Analysis.getInstrumentationMode() == TIM_GPR) {
     if (size == 4 && Analysis.getAccUsage(acc_idx) > 4) { 
@@ -301,22 +320,26 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
     }
   } else {
     assert(Analysis.getInstrumentationMode() == TIM_SIMD);
+    MachineInstrBuilder MIB =
+      InsertInstr(TASE_VPINSRrm[cLog2(size)], TASE_REG_DATA)
+      .addReg(TASE_REG_DATA);
+    for (int i = 0; i < X86::AddrNumOperands; i++) {
+      MIB.add(CurrentMI->getOperand(addrOffset + i));
+    }
+    MIB.addImm(acc_idx / size);
+    MIB.cloneMemRefs(*CurrentMI);
   }
 }
 
 // Optimized fast-path case where we can simply check the value from a destination register.
 // Clobbers the bottom byte of the temporary register.
 void X86TASECaptureTaintPass::PoisonCheckReg(size_t size) {
-  assert(size > 1 && "TASE: Cannot do a register-optimized poison check on byte value.");
-  int acc_idx = Analysis.AllocateAccOffset(size);
-  assert(acc_idx >= 0);
   InsertBefore = false;
+  unsigned int acc_idx = AllocateOffset(size);
   PoisonCheckRegInternal(size, CurrentMI->getOperand(0).getReg(), acc_idx);
 }
 
-void X86TASECaptureTaintPass::PoisonCheckRegInternal(size_t size, unsigned int reg, int acc_idx) {
-  assert(size > 1 && "TASE: Cannot do a register-optimized poison check on byte value.");
-  assert(acc_idx >= 0);
+void X86TASECaptureTaintPass::PoisonCheckRegInternal(size_t size, unsigned int reg, unsigned int acc_idx) {
   assert(reg != X86::NoRegister);
   reg = getX86SubSuperRegister(reg, size * 8);
   if (size == 16) {
@@ -342,17 +365,43 @@ void X86TASECaptureTaintPass::PoisonCheckRegInternal(size_t size, unsigned int r
     }
   } else {
     assert(Analysis.getInstrumentationMode() == TIM_SIMD);
+    InsertInstr(TASE_VPINSRrr[cLog2(size)], TASE_REG_DATA)
+      .addReg(TASE_REG_DATA)
+      .addReg(reg)
+      .addImm(acc_idx / size);
   }
 }
 
-void X86TASECaptureTaintPass::RotateAccumulator(size_t size, int acc_idx) {
+void X86TASECaptureTaintPass::RotateAccumulator(size_t size, unsigned int acc_idx) {
+  assert(Analysis.getInstrumentationMode() == TIM_GPR);
   if (size < 8) {
-    InsertInstr(X86::MOV8ri, getX86SubSuperRegister(TASE_REG_RET, 8))
+    InsertInstr(X86::MOV32ri, getX86SubSuperRegister(TASE_REG_RET, 4 * 8))
       .addImm(size * 8);
     InsertInstr(X86::SHLX64rr, TASE_REG_ACC[acc_idx])
       .addReg(TASE_REG_ACC[acc_idx])
       .addReg(TASE_REG_RET);
   }
+}
+
+unsigned int X86TASECaptureTaintPass::AllocateOffset(size_t size) {
+  int offset = -1;
+  if (Analysis.getInstrumentationMode() == TIM_SIMD) {
+    offset = Analysis.AllocateDataOffset(size);
+    if (offset < 0) {
+      InsertInstr(X86::VPCMPEQDrr, TASE_REG_DATA)
+        .addReg(TASE_REG_DATA)
+        .addReg(TASE_REG_REFERENCE);
+      InsertInstr(X86::VPORrr, TASE_REG_ACCUMULATOR)
+        .addReg(TASE_REG_ACCUMULATOR)
+        .addReg(TASE_REG_DATA);
+      Analysis.ResetDataOffsets();
+      offset = Analysis.AllocateDataOffset(size);
+    }
+  } else {
+    offset = Analysis.AllocateAccOffset(size);
+  }
+  assert(offset >= 0 && "TASE: Unable to acquire a register for poison instrumentation.");
+  return offset;
 }
 
 INITIALIZE_PASS(X86TASECaptureTaintPass, PASS_KEY, PASS_DESC, false, false)

@@ -30,6 +30,10 @@ static constexpr unsigned int TASE_REG_RET = X86::R8 + (REG_RET - 8);
 static constexpr unsigned int TASE_REG_ACC[] = {
   X86::R8 + (REG_ACC0 - 8), X86::R8 + (REG_ACC1 - 8) };
 
+static constexpr unsigned int TASE_REG_REFERENCE = X86::XMM0 + REG_REFERENCE;
+static constexpr unsigned int TASE_REG_ACCUMULATOR = X86::XMM0 + REG_ACCUMULATOR;
+static constexpr unsigned int TASE_REG_DATA = X86::XMM0 + REG_DATA;
+
 // Ordered by size.
 static constexpr unsigned int TASE_LOADrr[] = {
   X86::MOV8rr, X86::MOV16rr, X86::MOV32rr, X86::MOV64rr
@@ -37,6 +41,14 @@ static constexpr unsigned int TASE_LOADrr[] = {
 static constexpr unsigned int TASE_LOADrm[] = {
   X86::MOV8rm, X86::MOV16rm, X86::MOV32rm, X86::MOV64rm
 };
+
+static constexpr unsigned int TASE_VPINSRrr[] = {
+  X86::VPINSRBrr, X86::VPINSRWrr, X86::VPINSRDrr, X86::VPINSRQrr
+};
+static constexpr unsigned int TASE_VPINSRrm[] = {
+  X86::VPINSRBrm, X86::VPINSRWrm, X86::VPINSRDrm, X86::VPINSRQrm
+};
+
 
 // We can actually autogenerate this but I have these here to double check my understanding
 // of tblgen. To productionize this, see include/llvm/MC/MCInstrDesc.h.  You can add another
@@ -65,12 +77,22 @@ public:
   TASEAnalysis();
 
   bool isModeledFunction(StringRef name);
-  // Returns an index between 0 and NUM_ACCUMULATORS or -1 if we're out of room.
-  int AllocateAccOffset(size_t bytes);
-  void ResetAccOffsets();
   bool isMemInstr(unsigned int opcode);
   size_t getMemFootprint(unsigned int opcode);
+
+  // These functions only make sense in GPR instrumentation mode.
+  // Returns an index between 0 and NUM_ACCUMULATORS or -1 if we're out of
+  // room in all accumulators.
+  int AllocateAccOffset(size_t bytes);
+  void ResetAccOffsets();
   uint8_t getAccUsage(unsigned int offset) const;
+
+  // These functions only make sense in SIMD instrumentation mode.
+  // Returns a byte offset between 0 and XMMREG_SIZE for the LSB index of a
+  // slice of the requested size aligned to the requested size or -1 if we're
+  // out of room.
+  int AllocateDataOffset(size_t bytes);
+  void ResetDataOffsets();
 
   static TASEInstMode getInstrumentationMode();
 
@@ -79,6 +101,7 @@ private:
   using meminstrs_t = std::array<unsigned int, MEM_INSTRS.size()>;
 
   uint8_t AccumulatorBytes[NUM_ACCUMULATORS];
+  uint8_t DataUsageMask;
 
   static void initModeledFunctions();
   static void initMemInstrs();
