@@ -110,8 +110,8 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard() {
     .addReg(X86::NoRegister);   // segment
   // Indirectly jump to the springboard.
   InsertInstr(X86::JMP64m)
-    //.addReg(X86::RIP)         // base - TODO: double check the encoded lengths here.
-    .addReg(X86::NoRegister)    // base
+    .addReg(X86::RIP)           // base - TODO: double check the encoded lengths here.
+    //.addReg(X86::NoRegister)  // base
     .addImm(0)                  // scale
     .addReg(X86::NoRegister)    // index
     .addExternalSymbol("tase_springboard") // offset
@@ -162,7 +162,8 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
     // Exploit the fact that we are using a small code model and implicit
     // zero extension to shorten our instructions.
     InsertInstr(X86::CMP32mi)
-      .addReg(X86::NoRegister)    // base
+      //.addReg(X86::NoRegister)    // base
+      .addReg(X86::RIP)           // base
       .addImm(0)                  // scale
       .addReg(X86::NoRegister)    // index
       .addExternalSymbol("tase_springboard") // offset

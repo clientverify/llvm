@@ -153,7 +153,13 @@ bool X86TASEDecorateCartridgePass::SplitAtCalls(MachineBasicBlock &MBB) {
     }
   }
 
-  assert(hasInstr && "TASE: Encountered an empty block!");
+  // Unoptimized code sometimes has empty blocks.
+  // Just throw a NOP in there.
+  if (!hasInstr) {
+    LLVM_DEBUG(dbgs() << "TASE: Encountered an empty block.  Adding a NOOP to legalize it.");
+    BuildMI(&MBB, DebugLoc(), TII->get(X86::NOOP));
+    hasSplit = true;
+  }
   return hasSplit;
 }
 
