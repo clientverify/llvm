@@ -104,15 +104,14 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard() {
   // Load the body address into GPR_RET.
   InsertInstr(X86::LEA64r, TASE_REG_RET)
     .addReg(X86::RIP)           // base - attempt to use the locality of cartridgeBody.
-    .addImm(0)                  // scale
+    .addImm(1)                  // scale
     .addReg(X86::NoRegister)    // index
     .addSym(cartridge->Body())  // offset
     .addReg(X86::NoRegister);   // segment
   // Indirectly jump to the springboard.
   InsertInstr(X86::JMP64m)
-    .addReg(X86::RIP)           // base - TODO: double check the encoded lengths here.
-    //.addReg(X86::NoRegister)  // base
-    .addImm(0)                  // scale
+    .addReg(X86::NoRegister)    // base
+    .addImm(1)                  // scale
     .addReg(X86::NoRegister)    // index
     .addExternalSymbol("tase_springboard") // offset
     .addReg(X86::NoRegister);   // segment
@@ -126,7 +125,7 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard() {
   //BuildMI(*MBB, cartridgeBodyPDMI, cartridgeBodyPDMI->getDebugLoc(), TII->get(X86::MOV64rm))
   //  .addReg(X86::RAX)
   //  .addReg(X86::NoRegister)  // base
-  //  .addImm(0)                // scale
+  //  .addImm(1)                // scale
   //  .addReg(X86::NoRegister)  // index
   //  .addImm(0)                // offset
   //  .addReg(X86::NoRegister); // segment
@@ -162,9 +161,8 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
     // Exploit the fact that we are using a small code model and implicit
     // zero extension to shorten our instructions.
     InsertInstr(X86::CMP32mi)
-      //.addReg(X86::NoRegister)    // base
-      .addReg(X86::RIP)           // base
-      .addImm(0)                  // scale
+      .addReg(X86::NoRegister)    // base
+      .addImm(1)                  // scale
       .addReg(X86::NoRegister)    // index
       .addExternalSymbol("tase_springboard") // offset
       .addReg(X86::NoRegister)    // segment

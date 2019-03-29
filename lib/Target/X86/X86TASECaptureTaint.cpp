@@ -224,7 +224,7 @@ void X86TASECaptureTaintPass::PoisonCheckStack(int64_t stackOffset) {
   if (Analysis.getInstrumentationMode() == TIM_GPR) {
     InsertInstr(TASE_LOADrm[cLog2(stackAlignment)], TASE_REG_ACC[acc_idx])
       .addReg(X86::RSP)         // base
-      .addImm(0)                // scale
+      .addImm(1)                // scale
       .addReg(X86::NoRegister)  // index
       .addImm(stackOffset)      // offset
       .addReg(X86::NoRegister)  // segment
@@ -235,7 +235,7 @@ void X86TASECaptureTaintPass::PoisonCheckStack(int64_t stackOffset) {
     InsertInstr(TASE_VPINSRrm[cLog2(stackAlignment)], TASE_REG_DATA)
       .addReg(TASE_REG_DATA)
       .addReg(X86::RSP)         // base
-      .addImm(0)                // scale
+      .addImm(1)                // scale
       .addReg(X86::NoRegister)  // index
       .addImm(stackOffset)      // offset
       .addReg(X86::NoRegister)  // segment
