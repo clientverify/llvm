@@ -42,11 +42,11 @@ static constexpr unsigned int TASE_LOADrm[] = {
   X86::MOV8rm, X86::MOV16rm, X86::MOV32rm, X86::MOV64rm
 };
 
-static constexpr unsigned int TASE_VPINSRrr[] = {
-  X86::VPINSRBrr, X86::VPINSRWrr, X86::VPINSRDrr, X86::VPINSRQrr
+static constexpr unsigned int TASE_PINSRrr[] = {
+  X86::PINSRBrr, X86::PINSRWrr, X86::PINSRDrr, X86::PINSRQrr
 };
-static constexpr unsigned int TASE_VPINSRrm[] = {
-  X86::VPINSRBrm, X86::VPINSRWrm, X86::VPINSRDrm, X86::VPINSRQrm
+static constexpr unsigned int TASE_PINSRrm[] = {
+  X86::PINSRBrm, X86::PINSRWrm, X86::PINSRDrm, X86::PINSRQrm
 };
 
 
@@ -63,13 +63,37 @@ constexpr auto MEM_INSTRS = array_of(
   X86::RETQ, X86::CALLpcrel16, X86::CALL64pcrel32, X86::CALL64r, X86::FARCALL64,
   X86::POP64r, X86::PUSH64r, X86::PUSH64i8, X86::PUSH64i32,
   X86::PUSHF64, X86::POPF64,
+  // Must allow loads and stores of GPRs and immediates.
   X86::MOV8rm, X86::MOV16rm, X86::MOV32rm, X86::MOV64rm, X86::MOV8rm_NOREX,
   X86::MOV8mr, X86::MOV16mr, X86::MOV32mr, X86::MOV64mr, X86::MOV8mr_NOREX,
   X86::MOV8mi, X86::MOV16mi, X86::MOV32mi, X86::MOV64mi32,
+  // LLVM passes insist on some form of implicit sign-extension
+  // instruction available in order to rematerialize spilled values
+  // efficiently.
   X86::MOVZX16rm8, X86::MOVZX32rm8, X86::MOVZX32rm8_NOREX, X86::MOVZX32rm16,
   X86::MOVZX64rm8, X86::MOVZX64rm16,
   X86::MOVSX16rm8, X86::MOVSX32rm8, X86::MOVSX32rm8_NOREX, X86::MOVSX32rm16,
   X86::MOVSX64rm8, X86::MOVSX64rm16, X86::MOVSX64rm32,
+
+  // We allow some forms of SIMD register loads in order to support floating
+  // point arguments. Opportunisitic optimization attempts are welcome.
+
+  // Loads 32-bit values into SIMD registers.
+  X86::MOVSSmr, X86::MOVLPSmr, X86::MOVHPSmr,
+  X86::VMOVSSmr, X86::VMOVLPSmr, X86::VMOVHPSmr,
+  X86::MOVSSrm, X86::MOVLPSrm, X86::MOVHPSrm,
+  X86::VMOVSSrm, X86::VMOVLPSrm, X86::VMOVHPSrm,
+  X86::MOVDI2PDIrm, X86::MOVDI2SSrm, X86::MOVPDI2DImr, X86::MOVSS2DImr,
+  X86::VMOVDI2PDIrm, X86::VMOVDI2SSrm, X86::VMOVPDI2DImr, X86::VMOVSS2DImr,
+  // Loads 64-bit values into SIMD registers.
+  X86::MOVSDmr, X86::MOVLPDmr, X86::MOVHPDmr,
+  X86::VMOVSDmr, X86::VMOVLPDmr, X86::VMOVHPDmr,
+  X86::MOVSDrm, X86::MOVLPDrm, X86::MOVHPDrm,
+  X86::VMOVSDrm, X86::VMOVLPDrm, X86::VMOVHPDrm,
+  X86::MOV64toPQIrm, X86::MOVPQIto64mr, X86::MOV64toSDrm, X86::MOVSDto64mr, X86::MOVQI2PQIrm, X86::MOVPQI2QImr,
+  X86::VMOV64toPQIrm, X86::VMOVPQIto64mr, X86::VMOV64toSDrm, X86::VMOVSDto64mr, X86::VMOVQI2PQIrm, X86::VMOVPQI2QImr,
+  // These instructions all perform the same thing with roughly the same
+  // execution performance on Skylake - perform a 128-bit load or store.
   X86::MOVUPSmr, X86::MOVUPDmr, X86::MOVDQUmr,
   X86::MOVAPSmr, X86::MOVAPDmr, X86::MOVDQAmr,
   X86::VMOVUPSmr, X86::VMOVUPDmr, X86::VMOVDQUmr,
@@ -77,7 +101,12 @@ constexpr auto MEM_INSTRS = array_of(
   X86::MOVUPSrm, X86::MOVUPDrm, X86::MOVDQUrm,
   X86::MOVAPSrm, X86::MOVAPDrm, X86::MOVDQArm,
   X86::VMOVUPSrm, X86::VMOVUPDrm, X86::VMOVDQUrm,
-  X86::VMOVAPSrm, X86::VMOVAPDrm, X86::VMOVDQArm
+  X86::VMOVAPSrm, X86::VMOVAPDrm, X86::VMOVDQArm,
+  // These load 256-bits into YMM registers.
+  X86::VMOVUPSYmr, X86::VMOVUPDYmr, X86::VMOVDQUYmr,
+  X86::VMOVAPSYmr, X86::VMOVAPDYmr, X86::VMOVDQAYmr,
+  X86::VMOVUPSYrm, X86::VMOVUPDYrm, X86::VMOVDQUYrm,
+  X86::VMOVAPSYrm, X86::VMOVAPDYrm, X86::VMOVDQAYrm
   );
 
 class TASEAnalysis {
@@ -109,7 +138,7 @@ private:
   using meminstrs_t = std::array<unsigned int, MEM_INSTRS.size()>;
 
   uint8_t AccumulatorBytes[NUM_ACCUMULATORS];
-  uint8_t DataUsageMask;
+  unsigned int DataUsageMask;
 
   static void initModeledFunctions();
   static void initMemInstrs();

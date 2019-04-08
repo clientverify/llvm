@@ -111,37 +111,49 @@ size_t TASEAnalysis::getMemFootprint(unsigned int opcode) {
     case X86::POPF64:
     case X86::PUSHF64:
       return 8;
-    case X86::MOV8mi:
-    case X86::MOV8mr:
-    case X86::MOV8mr_NOREX:
-    case X86::MOV8rm:
-    case X86::MOV8rm_NOREX:
-    case X86::MOVZX16rm8:
-    case X86::MOVZX32rm8:
-    case X86::MOVZX32rm8_NOREX:
-    case X86::MOVZX64rm8:
-    case X86::MOVSX16rm8:
-    case X86::MOVSX32rm8:
-    case X86::MOVSX32rm8_NOREX:
-    case X86::MOVSX64rm8:
+    case X86::MOV8mi: case X86::MOV8mr: case X86::MOV8mr_NOREX: case X86::MOV8rm: case X86::MOV8rm_NOREX:
+    case X86::MOVZX16rm8: case X86::MOVZX32rm8: case X86::MOVZX32rm8_NOREX: case X86::MOVZX64rm8:
+    case X86::MOVSX16rm8: case X86::MOVSX32rm8: case X86::MOVSX32rm8_NOREX: case X86::MOVSX64rm8:
       return 1;
-    case X86::MOV16mi:
-    case X86::MOV16mr:
-    case X86::MOV16rm:
-    case X86::MOVZX32rm16:
-    case X86::MOVZX64rm16:
-    case X86::MOVSX32rm16:
-    case X86::MOVSX64rm16:
+    case X86::MOV16mi: case X86::MOV16mr: case X86::MOV16rm:
+    case X86::MOVZX32rm16: case X86::MOVZX64rm16:
+    case X86::MOVSX32rm16: case X86::MOVSX64rm16:
       return 2;
-    case X86::MOV32mi:
-    case X86::MOV32mr:
-    case X86::MOV32rm:
+    case X86::MOV32mi: case X86::MOV32mr: case X86::MOV32rm:
     case X86::MOVSX64rm32:
+    case X86::MOVSSmr: case X86::MOVLPSmr: case X86::MOVHPSmr:
+    case X86::VMOVSSmr: case X86::VMOVLPSmr: case X86::VMOVHPSmr:
+    case X86::MOVPDI2DImr: case X86::MOVSS2DImr:
+    case X86::VMOVPDI2DImr: case X86::VMOVSS2DImr:
       return 4;
-    case X86::MOV64mi32:
-    case X86::MOV64mr:
-    case X86::MOV64rm:
+    case X86::MOV64mi32: case X86::MOV64mr: case X86::MOV64rm:
+    case X86::MOVSDmr: case X86::MOVLPDmr: case X86::MOVHPDmr:
+    case X86::VMOVSDmr: case X86::VMOVLPDmr: case X86::VMOVHPDmr:
+    case X86::MOVPQIto64mr: case X86::MOVSDto64mr: case X86::MOVPQI2QImr:
+    case X86::VMOVPQIto64mr: case X86::VMOVSDto64mr: case X86::VMOVPQI2QImr:
       return 8;
+    case X86::MOVSSrm: case X86::MOVLPSrm: case X86::MOVHPSrm:
+    case X86::VMOVSSrm: case X86::VMOVLPSrm: case X86::VMOVHPSrm:
+    case X86::MOVDI2PDIrm: case X86::MOVDI2SSrm:
+    case X86::VMOVDI2PDIrm: case X86::VMOVDI2SSrm:
+    case X86::MOVSDrm: case X86::MOVLPDrm: case X86::MOVHPDrm:
+    case X86::VMOVSDrm: case X86::VMOVLPDrm: case X86::VMOVHPDrm:
+    case X86::MOV64toPQIrm: case X86::MOV64toSDrm: case X86::MOVQI2PQIrm:
+    case X86::VMOV64toPQIrm: case X86::VMOV64toSDrm: case X86::VMOVQI2PQIrm:
+    case X86::MOVUPSmr: case X86::MOVUPDmr: case X86::MOVDQUmr:
+    case X86::MOVAPSmr: case X86::MOVAPDmr: case X86::MOVDQAmr:
+    case X86::VMOVUPSmr: case X86::VMOVUPDmr: case X86::VMOVDQUmr:
+    case X86::VMOVAPSmr: case X86::VMOVAPDmr: case X86::VMOVDQAmr:
+    case X86::MOVUPSrm: case X86::MOVUPDrm: case X86::MOVDQUrm:
+    case X86::MOVAPSrm: case X86::MOVAPDrm: case X86::MOVDQArm:
+    case X86::VMOVUPSrm: case X86::VMOVUPDrm: case X86::VMOVDQUrm:
+    case X86::VMOVAPSrm: case X86::VMOVAPDrm: case X86::VMOVDQArm:
+      return 16;
+    case X86::VMOVUPSYmr: case X86::VMOVUPDYmr: case X86::VMOVDQUYmr:
+    case X86::VMOVAPSYmr: case X86::VMOVAPDYmr: case X86::VMOVDQAYmr:
+    case X86::VMOVUPSYrm: case X86::VMOVUPDYrm: case X86::VMOVDQUYrm:
+    case X86::VMOVAPSYrm: case X86::VMOVAPDYrm: case X86::VMOVDQAYrm:
+      return 32;
   }
   llvm_unreachable("TASE: How is this even possible?");
 }
@@ -175,8 +187,8 @@ uint8_t TASEAnalysis::getAccUsage(unsigned int idx) const {
 /* -- SIMD ------------------------------------------------------------------ */
 int TASEAnalysis::AllocateDataOffset(size_t bytes) {
   assert(bytes && " TASE: Cannot instrument instruction with unknown operand bytes.");
-  assert(bytes <= REG_SIZE && "TASE: Cannot currently handle SIMD values or larger.");
   assert(bytes > 1 && "TASE: Cannot do single byte taint checks.");
+  assert(bytes <= XMMREG_SIZE);
 
   // We want a word offset.
   // Examples:
@@ -187,9 +199,9 @@ int TASEAnalysis::AllocateDataOffset(size_t bytes) {
   // The above makes sense because the mask (0b11) indicates 2 words (2x2 byte values).
   // => offset in [0, 2, 4, 6]
   // => offset/stride in [0, 1, 2, 3]
-  uint8_t stride = bytes / POISON_SIZE;
-  uint8_t mask = (1 << stride) - 1;
-  uint8_t offset = 0;
+  unsigned int stride = bytes / POISON_SIZE;
+  unsigned int mask = (1 << stride) - 1;
+  unsigned int offset = 0;
   // The < 8  here is sizeof(xmm)/2.
   for (; offset < XMMREG_SIZE / POISON_SIZE; offset += stride) {
     if ((DataUsageMask & (mask << offset)) == 0) {
@@ -201,6 +213,9 @@ int TASEAnalysis::AllocateDataOffset(size_t bytes) {
   if (offset >= XMMREG_SIZE / POISON_SIZE) {
     return -1;
   } else {
+    if (bytes >= XMMREG_SIZE) {
+      assert(offset == 0 && "TASE instrumentation must poison instrument SIMD operands directly.");
+    }
     // Mark the new words as being used.
     DataUsageMask |= mask << offset;
     return offset * POISON_SIZE;

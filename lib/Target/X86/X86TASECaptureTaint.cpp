@@ -116,8 +116,11 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
         // Non-memory instructions need no instrumentation.
         continue;
       }
-      assert(Analysis.isMemInstr(MI.getOpcode()) &&
-          "TASE: Encountered an instruction we haven't handled.");
+      if (!Analysis.isMemInstr(MI.getOpcode())) {
+        MI.dump();
+        MBB.dump();
+        assert(false && "TASE: Encountered an instruction we haven't handled.");
+      }
       if (Analysis.getInstrumentationMode() != TIM_NONE) {
         InstrumentInstruction(MI);
         modified = true;
@@ -171,39 +174,49 @@ void X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
       // slot for poison before the write.
       PoisonCheckStack(-size);
       break;
-    case X86::MOV8mi:
-    case X86::MOV8mr:
-    case X86::MOV8mr_NOREX:
-    case X86::MOV8rm:
-    case X86::MOV8rm_NOREX:
-    case X86::MOVZX16rm8:
-    case X86::MOVZX32rm8:
-    case X86::MOVZX32rm8_NOREX:
-    case X86::MOVZX64rm8:
-    case X86::MOVSX16rm8:
-    case X86::MOVSX32rm8:
-    case X86::MOVSX32rm8_NOREX:
-    case X86::MOVSX64rm8:
+    case X86::MOV8mi: case X86::MOV8mr: case X86::MOV8mr_NOREX: case X86::MOV8rm: case X86::MOV8rm_NOREX:
+    case X86::MOVZX16rm8: case X86::MOVZX32rm8: case X86::MOVZX32rm8_NOREX: case X86::MOVZX64rm8:
+    case X86::MOVSX16rm8: case X86::MOVSX32rm8: case X86::MOVSX32rm8_NOREX: case X86::MOVSX64rm8:
       // For 8 bit memory accesses, we want access to the address so that we can
       // appropriately align it for our 2 byte poison check.
-    case X86::MOV16mi:
-    case X86::MOV16mr:
-    case X86::MOV32mi:
-    case X86::MOV32mr:
-    case X86::MOV64mi32:
-    case X86::MOV64mr:
+    case X86::MOV16mi: case X86::MOV16mr:
+    case X86::MOV32mi: case X86::MOV32mr:
+    case X86::MOV64mi32: case X86::MOV64mr:
+    case X86::MOVSSmr: case X86::MOVLPSmr: case X86::MOVHPSmr:
+    case X86::VMOVSSmr: case X86::VMOVLPSmr: case X86::VMOVHPSmr:
+    case X86::MOVPDI2DImr: case X86::MOVSS2DImr:
+    case X86::VMOVPDI2DImr: case X86::VMOVSS2DImr:
+    case X86::MOVSDmr: case X86::MOVLPDmr: case X86::MOVHPDmr:
+    case X86::VMOVSDmr: case X86::VMOVLPDmr: case X86::VMOVHPDmr:
+    case X86::MOVPQIto64mr: case X86::MOVSDto64mr: case X86::MOVPQI2QImr:
+    case X86::VMOVPQIto64mr: case X86::VMOVSDto64mr: case X86::VMOVPQI2QImr:
+    case X86::MOVUPSmr: case X86::MOVUPDmr: case X86::MOVDQUmr:
+    case X86::MOVAPSmr: case X86::MOVAPDmr: case X86::MOVDQAmr:
+    case X86::VMOVUPSmr: case X86::VMOVUPDmr: case X86::VMOVDQUmr:
+    case X86::VMOVAPSmr: case X86::VMOVAPDmr: case X86::VMOVDQAmr:
       PoisonCheckMem(size);
       break;
-    case X86::MOV16rm:
-    case X86::MOVZX32rm16:
-    case X86::MOVZX64rm16:
-    case X86::MOVSX32rm16:
-    case X86::MOVSX64rm16:
-    case X86::MOV32rm:
-    case X86::MOVSX64rm32:
-    case X86::MOV64rm:
+    case X86::MOV16rm: case X86::MOV32rm: case X86::MOV64rm:
+    case X86::MOVZX32rm16: case X86::MOVZX64rm16:
+    case X86::MOVSX32rm16: case X86::MOVSX64rm16: case X86::MOVSX64rm32:
+    case X86::MOVSSrm: case X86::MOVLPSrm: case X86::MOVHPSrm:
+    case X86::VMOVSSrm: case X86::VMOVLPSrm: case X86::VMOVHPSrm:
+    case X86::MOVDI2PDIrm: case X86::MOVDI2SSrm:
+    case X86::VMOVDI2PDIrm: case X86::VMOVDI2SSrm:
+    case X86::MOVSDrm: case X86::MOVLPDrm: case X86::MOVHPDrm:
+    case X86::VMOVSDrm: case X86::VMOVLPDrm: case X86::VMOVHPDrm:
+    case X86::MOV64toPQIrm: case X86::MOV64toSDrm: case X86::MOVQI2PQIrm:
+    case X86::VMOV64toPQIrm: case X86::VMOV64toSDrm: case X86::VMOVQI2PQIrm:
+    case X86::MOVUPSrm: case X86::MOVUPDrm: case X86::MOVDQUrm:
+    case X86::MOVAPSrm: case X86::MOVAPDrm: case X86::MOVDQArm:
+    case X86::VMOVUPSrm: case X86::VMOVUPDrm: case X86::VMOVDQUrm:
+    case X86::VMOVAPSrm: case X86::VMOVAPDrm: case X86::VMOVDQArm:
       PoisonCheckReg(size);
       break;
+    //case X86::VMOVUPSYmr: case X86::VMOVUPDYmr: case X86::VMOVDQUYmr:
+    //case X86::VMOVAPSYmr: case X86::VMOVAPDYmr: case X86::VMOVDQAYmr:
+    //case X86::VMOVUPSYrm: case X86::VMOVUPDYrm: case X86::VMOVDQUYrm:
+    //case X86::VMOVAPSYrm: case X86::VMOVAPDYrm: case X86::VMOVDQAYrm:
   }
   CurrentMI = nullptr;
 }
@@ -232,7 +245,8 @@ void X86TASECaptureTaintPass::PoisonCheckStack(int64_t stackOffset) {
     // No rotation needed - it's an 8 byte read.
   } else {
     assert(Analysis.getInstrumentationMode() == TIM_SIMD);
-    InsertInstr(TASE_VPINSRrm[cLog2(stackAlignment)], TASE_REG_DATA)
+    //TODO: If AVX is enabled, switch to VPINSR or something else.
+    InsertInstr(TASE_PINSRrm[cLog2(stackAlignment)], TASE_REG_DATA)
       .addReg(TASE_REG_DATA)
       .addReg(X86::RSP)         // base
       .addImm(1)                // scale
@@ -259,15 +273,42 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
   // It is always legal to have instructions with no mem_operands - the
   // rest of the compiler should just deal with it extremely conservatively
   // in terms of alignment and volatility.
-  if (size == 16) {
-    // TODO: Handle 16-byte SIMD case.
+  if (size >= 16) {
+    assert(Analysis.getInstrumentationMode() == TIM_SIMD && "TASE: GPR poisnoning not implemented for SIMD registers.");
+    assert(size == 16 && "TASE: Unimplemented. Handle YMM/ZMM SIMD instructions properly.");
+    // We are going to be silly and not check mem_operands.getAlignment here.
+    // Agner Fog says MOVUPS/MOVDQU run at the same speed as MOVAPS/MOVDQA on
+    // post Nahalem architectures. My assumption is that this carries over to VCMPEQW.
+    // So we just assume reasonably aligned access and let the memory fabric/L1 cache
+    // controller do its magic.
+    // TODO: Check if our alignment is at least 2. The compiler would have to
+    // be stark-raving mad to emit a vex-prefixed SIMD load on a buffer
+    // misaligned by one byte but one never knows...
+    //MachineInstrBuilder MIB = InsertInstr(X86::VPCMPEQWrm, TASE_REG_DATA)
+    //  .addReg(TASE_REG_REFERENCE);
+    //for (int i = 0; i < X86::AddrNumOperands; i++) {
+    //  MIB.addAndUse(CurrentMI->getOperand(addrOffset + i));
+    //}
+    //MIB.cloneMemRefs(*CurrentMI);
+    //InsertInstr(X86::PORrr, TASE_REG_ACCUMULATOR)
+    //  .addReg(TASE_REG_ACCUMULATOR);
+    //  .addReg(TASE_REG_DATA);
+    Analysis.ResetDataOffsets();
   } else if (size == 1) {
     // Precalculate the address, align it to a two byte boundary and then
     // read two bytes to ensure a proper taint check.
     size = 2;
     MachineInstrBuilder MIB = InsertInstr(X86::LEA64r, TASE_REG_TMP);
     for (int i = 0; i < X86::AddrNumOperands; i++) {
-      MIB.add(CurrentMI->getOperand(addrOffset + i));
+      // TODO: We can't run the machine code verifier because we emit duplicate KILL
+      // directives for a registers used to generate the address here.  Fix this!
+      // For example:
+      // *** Bad machine code: Using an undefined physical register ***
+      // - function:    AES128_ECB_encrypt
+      // - basic block: %bb.0 entry (0xb573388)
+      // - instruction: renamable $al = MOV8rm killed renamable $rdi, 1, $noreg, 15, $noreg :: (load 1 from %ir.arrayidx.15.i, !tbaa !2)
+      // - operand 1:   killed renamable $rdi
+      MIB.addAndUse(CurrentMI->getOperand(addrOffset + i));
     }
     // Use TASE_REG_RET as a temporary register to hold offsets/indices.
     // TODO: If we can establish that EFLAGS is dead, we can use a shorter SHR.
@@ -282,20 +323,20 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
         .addImm(1)                // scale
         .addReg(TASE_REG_TMP)     // index
         .addImm(0)                // offset
-        .addReg(X86::NoRegister)  // segment
-        .cloneMemRefs(*CurrentMI);
+        .addReg(X86::NoRegister); // segment
+        //.cloneMemRefs(*CurrentMI);
       RotateAccumulator(size, acc_idx);
     } else {
       assert(Analysis.getInstrumentationMode() == TIM_SIMD);
-      InsertInstr(TASE_VPINSRrm[cLog2(size)], TASE_REG_DATA)
+      InsertInstr(TASE_PINSRrm[cLog2(size)], TASE_REG_DATA)
         .addReg(TASE_REG_DATA)
         .addReg(TASE_REG_TMP)     // base
         .addImm(1)                // scale
         .addReg(TASE_REG_TMP)     // index
         .addImm(0)                // offset
         .addReg(X86::NoRegister)  // segment
-        .addImm(acc_idx / size)
-        .cloneMemRefs(*CurrentMI);
+        .addImm(acc_idx / size);
+        //.cloneMemRefs(*CurrentMI);
     }
   } else if (Analysis.getInstrumentationMode() == TIM_GPR) {
     if (size == 4 && Analysis.getAccUsage(acc_idx) > 4) { 
@@ -304,30 +345,30 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
       // and then move it into accumulator 2 bytes at a time.
       MachineInstrBuilder MIB = InsertInstr(X86::MOV32rm, getX86SubSuperRegister(TASE_REG_TMP, size * 8));
       for (int i = 0; i < X86::AddrNumOperands; i++) {
-        MIB.add(CurrentMI->getOperand(addrOffset + i));
+        MIB.addAndUse(CurrentMI->getOperand(addrOffset + i));
       }
-      MIB.cloneMemRefs(*CurrentMI);
+      //MIB.cloneMemRefs(*CurrentMI);
       PoisonCheckRegInternal(size, TASE_REG_TMP, acc_idx);
     } else {
     // size is 2 or 8
       MachineInstrBuilder MIB =
         InsertInstr(TASE_LOADrm[cLog2(size)], getX86SubSuperRegister(TASE_REG_ACC[acc_idx], size * 8));
       for (int i = 0; i < X86::AddrNumOperands; i++) {
-        MIB.add(CurrentMI->getOperand(addrOffset + i));
+        MIB.addAndUse(CurrentMI->getOperand(addrOffset + i));
       }
-      MIB.cloneMemRefs(*CurrentMI);
+      //MIB.cloneMemRefs(*CurrentMI);
       RotateAccumulator(size, acc_idx);
     }
   } else {
     assert(Analysis.getInstrumentationMode() == TIM_SIMD);
     MachineInstrBuilder MIB =
-      InsertInstr(TASE_VPINSRrm[cLog2(size)], TASE_REG_DATA)
+      InsertInstr(TASE_PINSRrm[cLog2(size)], TASE_REG_DATA)
       .addReg(TASE_REG_DATA);
     for (int i = 0; i < X86::AddrNumOperands; i++) {
-      MIB.add(CurrentMI->getOperand(addrOffset + i));
+      MIB.addAndUse(CurrentMI->getOperand(addrOffset + i));
     }
     MIB.addImm(acc_idx / size);
-    MIB.cloneMemRefs(*CurrentMI);
+    //MIB.cloneMemRefs(*CurrentMI);
   }
 }
 
@@ -341,34 +382,44 @@ void X86TASECaptureTaintPass::PoisonCheckReg(size_t size) {
 
 void X86TASECaptureTaintPass::PoisonCheckRegInternal(size_t size, unsigned int reg, unsigned int acc_idx) {
   assert(reg != X86::NoRegister);
-  reg = getX86SubSuperRegister(reg, size * 8);
-  if (size == 16) {
-    // TODO: Handle 16-byte SIMD case.
-  } else if (Analysis.getInstrumentationMode() == TIM_GPR) {
-    if (size == 4 && Analysis.getAccUsage(acc_idx) >= 4) {
-      // Cannot use a direct 32-bit move as that will zero out the top bits
-      // of the 64-bit accumulator.  Instead, move 2 bytes at a time.
-      // Note that PoisonCheckReg will clobber the bottom byte of the (unused)
-      // return register.
-      PoisonCheckRegInternal(2, reg, acc_idx);
-      unsigned int tmp_reg = getX86SubSuperRegister(TASE_REG_TMP, size * 8);
-      // Bottom byte of temporary should already have "16" loaded into it.
-      InsertInstr(X86::SHRX32rr, tmp_reg)
-        .addReg(reg)
-        .addReg(getX86SubSuperRegister(TASE_REG_RET, size * 8));
-      PoisonCheckRegInternal(2, tmp_reg, acc_idx);
-    } else {
-      // Exploit the fact that a zero extension is exactly what we need if size == 4.-
-      InsertInstr(TASE_LOADrr[cLog2(size)], getX86SubSuperRegister(TASE_REG_ACC[acc_idx], size * 8))
-        .addReg(reg);
-      RotateAccumulator(size, acc_idx);
-    }
+  if (size >= 16) {
+    assert(Analysis.getInstrumentationMode() == TIM_SIMD && "TASE: GPR poisnoning not implemented for SIMD registers.");
+    assert(size == 16 && "TASE: Handle AVX instructions");
+    //InsertInstr(X86::VPCMPEQWrr, TASE_REG_DATA)
+    //  .addReg(reg)
+    //  .addReg(TASE_REG_REFERENCE);
+    //InsertInstr(X86::PORrr, TASE_REG_ACCUMULATOR)
+    //  .addReg(TASE_REG_ACCUMULATOR);
+    //  .addReg(TASE_REG_DATA);
+    Analysis.ResetDataOffsets();
   } else {
-    assert(Analysis.getInstrumentationMode() == TIM_SIMD);
-    InsertInstr(TASE_VPINSRrr[cLog2(size)], TASE_REG_DATA)
-      .addReg(TASE_REG_DATA)
-      .addReg(reg)
-      .addImm(acc_idx / size);
+    reg = getX86SubSuperRegister(reg, size * 8);
+    if (Analysis.getInstrumentationMode() == TIM_GPR) {
+      if (size == 4 && Analysis.getAccUsage(acc_idx) >= 4) {
+        // Cannot use a direct 32-bit move as that will zero out the top bits
+        // of the 64-bit accumulator.  Instead, move 2 bytes at a time.
+        // Note that PoisonCheckReg will clobber the bottom byte of the (unused)
+        // return register.
+        PoisonCheckRegInternal(2, reg, acc_idx);
+        unsigned int tmp_reg = getX86SubSuperRegister(TASE_REG_TMP, size * 8);
+        // Bottom byte of temporary should already have "16" loaded into it.
+        InsertInstr(X86::SHRX32rr, tmp_reg)
+          .addReg(reg)
+          .addReg(getX86SubSuperRegister(TASE_REG_RET, size * 8));
+        PoisonCheckRegInternal(2, tmp_reg, acc_idx);
+      } else {
+        // Exploit the fact that a zero extension is exactly what we need if size == 4.-
+        InsertInstr(TASE_LOADrr[cLog2(size)], getX86SubSuperRegister(TASE_REG_ACC[acc_idx], size * 8))
+          .addReg(reg);
+        RotateAccumulator(size, acc_idx);
+      }
+    } else {
+      assert(Analysis.getInstrumentationMode() == TIM_SIMD);
+      InsertInstr(TASE_PINSRrr[cLog2(size)], TASE_REG_DATA)
+        .addReg(TASE_REG_DATA)
+        .addReg(reg)
+        .addImm(acc_idx / size);
+    }
   }
 }
 
@@ -388,10 +439,10 @@ unsigned int X86TASECaptureTaintPass::AllocateOffset(size_t size) {
   if (Analysis.getInstrumentationMode() == TIM_SIMD) {
     offset = Analysis.AllocateDataOffset(size);
     if (offset < 0) {
-      InsertInstr(X86::VPCMPEQDrr, TASE_REG_DATA)
+      InsertInstr(X86::PCMPEQWrr, TASE_REG_DATA)
         .addReg(TASE_REG_DATA)
         .addReg(TASE_REG_REFERENCE);
-      InsertInstr(X86::VPORrr, TASE_REG_ACCUMULATOR)
+      InsertInstr(X86::PORrr, TASE_REG_ACCUMULATOR)
         .addReg(TASE_REG_ACCUMULATOR)
         .addReg(TASE_REG_DATA);
       Analysis.ResetDataOffsets();
