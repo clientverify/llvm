@@ -3860,6 +3860,7 @@ multiclass sse2_pinsrw<bit Is2Addr = 1> {
        [(set VR128:$dst,
          (X86pinsrw VR128:$src1, GR32orGR64:$src2, imm:$src3))]>,
        Sched<[WriteVecInsert]>;
+  let isAllowedMemInstr = 1 in
   def rm : Ii8<0xC4, MRMSrcMem,
                       (outs VR128:$dst), (ins VR128:$src1,
                        i16mem:$src2, u8imm:$src3),
@@ -5180,7 +5181,7 @@ multiclass SS41I_extract8<bits<8> opc, string OpcodeStr> {
                  [(set GR32orGR64:$dst, (X86pextrb (v16i8 VR128:$src1),
                                          imm:$src2))]>,
                   Sched<[WriteVecExtract]>;
-  let hasSideEffects = 0, mayStore = 1 in
+  let hasSideEffects = 0, mayStore = 1, isAllowedMemInstr = 1 in
   def mr : SS4AIi8<opc, MRMDestMem, (outs),
                  (ins i8mem:$dst, VR128:$src1, u8imm:$src2),
                  !strconcat(OpcodeStr,
@@ -5204,7 +5205,7 @@ multiclass SS41I_extract16<bits<8> opc, string OpcodeStr> {
                    "\t{$src2, $src1, $dst|$dst, $src1, $src2}"), []>,
                    Sched<[WriteVecExtract]>, FoldGenData<NAME#rr>;
 
-  let hasSideEffects = 0, mayStore = 1 in
+  let hasSideEffects = 0, mayStore = 1, isAllowedMemInstr = 1 in
   def mr : SS4AIi8<opc, MRMDestMem, (outs),
                  (ins i16mem:$dst, VR128:$src1, u8imm:$src2),
                  !strconcat(OpcodeStr,
@@ -5228,6 +5229,7 @@ multiclass SS41I_extract32<bits<8> opc, string OpcodeStr> {
                  [(set GR32:$dst,
                   (extractelt (v4i32 VR128:$src1), imm:$src2))]>,
                   Sched<[WriteVecExtract]>;
+  let isAllowedMemInstr = 1 in
   def mr : SS4AIi8<opc, MRMDestMem, (outs),
                  (ins i32mem:$dst, VR128:$src1, u8imm:$src2),
                  !strconcat(OpcodeStr,
@@ -5250,6 +5252,7 @@ multiclass SS41I_extract64<bits<8> opc, string OpcodeStr> {
                  [(set GR64:$dst,
                   (extractelt (v2i64 VR128:$src1), imm:$src2))]>,
                   Sched<[WriteVecExtract]>;
+  let isAllowedMemInstr = 1 in
   def mr : SS4AIi8<opc, MRMDestMem, (outs),
                  (ins i64mem:$dst, VR128:$src1, u8imm:$src2),
                  !strconcat(OpcodeStr,
@@ -5313,6 +5316,7 @@ multiclass SS41I_insert8<bits<8> opc, string asm, bit Is2Addr = 1> {
       [(set VR128:$dst,
         (X86pinsrb VR128:$src1, GR32orGR64:$src2, imm:$src3))]>,
       Sched<[WriteVecInsert]>;
+  let isAllowedMemInstr = 1 in
   def rm : SS4AIi8<opc, MRMSrcMem, (outs VR128:$dst),
       (ins VR128:$src1, i8mem:$src2, u8imm:$src3),
       !if(Is2Addr,
@@ -5339,6 +5343,7 @@ multiclass SS41I_insert32<bits<8> opc, string asm, bit Is2Addr = 1> {
       [(set VR128:$dst,
         (v4i32 (insertelt VR128:$src1, GR32:$src2, imm:$src3)))]>,
       Sched<[WriteVecInsert]>;
+  let isAllowedMemInstr = 1 in
   def rm : SS4AIi8<opc, MRMSrcMem, (outs VR128:$dst),
       (ins VR128:$src1, i32mem:$src2, u8imm:$src3),
       !if(Is2Addr,
@@ -5365,6 +5370,7 @@ multiclass SS41I_insert64<bits<8> opc, string asm, bit Is2Addr = 1> {
       [(set VR128:$dst,
         (v2i64 (insertelt VR128:$src1, GR64:$src2, imm:$src3)))]>,
       Sched<[WriteVecInsert]>;
+  let isAllowedMemInstr = 1 in
   def rm : SS4AIi8<opc, MRMSrcMem, (outs VR128:$dst),
       (ins VR128:$src1, i64mem:$src2, u8imm:$src3),
       !if(Is2Addr,

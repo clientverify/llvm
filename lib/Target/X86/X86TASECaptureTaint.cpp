@@ -177,6 +177,7 @@ void X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
     case X86::MOV8mi: case X86::MOV8mr: case X86::MOV8mr_NOREX: case X86::MOV8rm: case X86::MOV8rm_NOREX:
     case X86::MOVZX16rm8: case X86::MOVZX32rm8: case X86::MOVZX32rm8_NOREX: case X86::MOVZX64rm8:
     case X86::MOVSX16rm8: case X86::MOVSX32rm8: case X86::MOVSX32rm8_NOREX: case X86::MOVSX64rm8:
+    case X86::PINSRBrm: case X86::VPINSRBrm:
       // For 8 bit memory accesses, we want access to the address so that we can
       // appropriately align it for our 2 byte poison check.
     case X86::MOV16mi: case X86::MOV16mr:
@@ -194,6 +195,8 @@ void X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
     case X86::MOVAPSmr: case X86::MOVAPDmr: case X86::MOVDQAmr:
     case X86::VMOVUPSmr: case X86::VMOVUPDmr: case X86::VMOVDQUmr:
     case X86::VMOVAPSmr: case X86::VMOVAPDmr: case X86::VMOVDQAmr:
+    case X86::PEXTRBmr: case X86::PEXTRWmr: case X86::PEXTRDmr: case X86::PEXTRQmr:
+    case X86::VPEXTRBmr: case X86::VPEXTRWmr: case X86::VPEXTRDmr: case X86::VPEXTRQmr:
       PoisonCheckMem(size);
       break;
     case X86::MOV16rm: case X86::MOV32rm: case X86::MOV64rm:
@@ -211,6 +214,8 @@ void X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
     case X86::MOVAPSrm: case X86::MOVAPDrm: case X86::MOVDQArm:
     case X86::VMOVUPSrm: case X86::VMOVUPDrm: case X86::VMOVDQUrm:
     case X86::VMOVAPSrm: case X86::VMOVAPDrm: case X86::VMOVDQArm:
+    case X86::PINSRWrm: case X86::PINSRDrm: case X86::PINSRQrm:
+    case X86::VPINSRWrm: case X86::VPINSRDrm: case X86::VPINSRQrm:
       PoisonCheckReg(size);
       break;
     //case X86::VMOVUPSYmr: case X86::VMOVUPDYmr: case X86::VMOVDQUYmr:
@@ -300,14 +305,6 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
     size = 2;
     MachineInstrBuilder MIB = InsertInstr(X86::LEA64r, TASE_REG_TMP);
     for (int i = 0; i < X86::AddrNumOperands; i++) {
-      // TODO: We can't run the machine code verifier because we emit duplicate KILL
-      // directives for a registers used to generate the address here.  Fix this!
-      // For example:
-      // *** Bad machine code: Using an undefined physical register ***
-      // - function:    AES128_ECB_encrypt
-      // - basic block: %bb.0 entry (0xb573388)
-      // - instruction: renamable $al = MOV8rm killed renamable $rdi, 1, $noreg, 15, $noreg :: (load 1 from %ir.arrayidx.15.i, !tbaa !2)
-      // - operand 1:   killed renamable $rdi
       MIB.addAndUse(CurrentMI->getOperand(addrOffset + i));
     }
     // Use TASE_REG_RET as a temporary register to hold offsets/indices.

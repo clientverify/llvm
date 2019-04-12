@@ -28,7 +28,7 @@ static cl::opt<TASEInstMode, true> TASEInstrumentationModeFlag(
       clEnumValN(TIM_GPR, "gpr", "GPR based TASE taint tracking"),
       clEnumValN(TIM_SIMD, "simd", "SIMD based TASE taint tracking")),
     cl::location(TASEInstrumentationMode),
-    cl::init(TIM_GPR));
+    cl::init(TIM_SIMD));
 
 namespace llvm {
 
@@ -114,10 +114,13 @@ size_t TASEAnalysis::getMemFootprint(unsigned int opcode) {
     case X86::MOV8mi: case X86::MOV8mr: case X86::MOV8mr_NOREX: case X86::MOV8rm: case X86::MOV8rm_NOREX:
     case X86::MOVZX16rm8: case X86::MOVZX32rm8: case X86::MOVZX32rm8_NOREX: case X86::MOVZX64rm8:
     case X86::MOVSX16rm8: case X86::MOVSX32rm8: case X86::MOVSX32rm8_NOREX: case X86::MOVSX64rm8:
+    case X86::PEXTRBmr: case X86::VPEXTRBmr:
+    case X86::PINSRBrm: case X86::VPINSRBrm:
       return 1;
     case X86::MOV16mi: case X86::MOV16mr: case X86::MOV16rm:
     case X86::MOVZX32rm16: case X86::MOVZX64rm16:
     case X86::MOVSX32rm16: case X86::MOVSX64rm16:
+    case X86::PEXTRWmr: case X86::VPEXTRWmr:
       return 2;
     case X86::MOV32mi: case X86::MOV32mr: case X86::MOV32rm:
     case X86::MOVSX64rm32:
@@ -125,12 +128,14 @@ size_t TASEAnalysis::getMemFootprint(unsigned int opcode) {
     case X86::VMOVSSmr: case X86::VMOVLPSmr: case X86::VMOVHPSmr:
     case X86::MOVPDI2DImr: case X86::MOVSS2DImr:
     case X86::VMOVPDI2DImr: case X86::VMOVSS2DImr:
+    case X86::PEXTRDmr: case X86::VPEXTRDmr:
       return 4;
     case X86::MOV64mi32: case X86::MOV64mr: case X86::MOV64rm:
     case X86::MOVSDmr: case X86::MOVLPDmr: case X86::MOVHPDmr:
     case X86::VMOVSDmr: case X86::VMOVLPDmr: case X86::VMOVHPDmr:
     case X86::MOVPQIto64mr: case X86::MOVSDto64mr: case X86::MOVPQI2QImr:
     case X86::VMOVPQIto64mr: case X86::VMOVSDto64mr: case X86::VMOVPQI2QImr:
+    case X86::PEXTRQmr: case X86::VPEXTRQmr:
       return 8;
     case X86::MOVSSrm: case X86::MOVLPSrm: case X86::MOVHPSrm:
     case X86::VMOVSSrm: case X86::VMOVLPSrm: case X86::VMOVHPSrm:
@@ -148,6 +153,8 @@ size_t TASEAnalysis::getMemFootprint(unsigned int opcode) {
     case X86::MOVAPSrm: case X86::MOVAPDrm: case X86::MOVDQArm:
     case X86::VMOVUPSrm: case X86::VMOVUPDrm: case X86::VMOVDQUrm:
     case X86::VMOVAPSrm: case X86::VMOVAPDrm: case X86::VMOVDQArm:
+    case X86::PINSRWrm: case X86::PINSRDrm: case X86::PINSRQrm:
+    case X86::VPINSRWrm: case X86::VPINSRDrm: case X86::VPINSRQrm:
       return 16;
     case X86::VMOVUPSYmr: case X86::VMOVUPDYmr: case X86::VMOVDQUYmr:
     case X86::VMOVAPSYmr: case X86::VMOVAPDYmr: case X86::VMOVDQAYmr:

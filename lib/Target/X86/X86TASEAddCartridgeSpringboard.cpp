@@ -109,7 +109,7 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard() {
     .addSym(cartridge->Body())  // offset
     .addReg(X86::NoRegister);   // segment
   // Indirectly jump to the springboard.
-  InsertInstr(X86::JMP64m)
+  InsertInstr(X86::TASE_JMP64m)
     .addReg(X86::NoRegister)    // base
     .addImm(1)                  // scale
     .addReg(X86::NoRegister)    // index
@@ -167,7 +167,7 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
       .addExternalSymbol("tase_springboard") // offset
       .addReg(X86::NoRegister)    // segment
       .addExternalSymbol("sb_disabled");
-    InsertInstr(X86::JNE_1)
+    InsertInstr(X86::TASE_JNE)
       .addExternalSymbol("sb_modeled");
     FirstMI = &MF.front().front();
     EmitSpringboard();
