@@ -419,10 +419,10 @@ let isCall = 1, isTerminator = 1, isReturn = 1, isBranch = 1,
 // TASE related pseudo-jump to legalize generated code.
 let isCodeGenOnly = 1, hasSideEffects = 1 in {
   let mayLoad = 1 in
-  def TASE_JMP64m : I<0xFF, MRM4m, (outs), (ins i64mem:$dst), "jmp{q}\t{*}$dst",
-                      []>;
+  def TASE_JMP64m : I<0xFF, MRM4m, (outs), (ins i64mem:$dst), "jmp{q}\t{*}$dst", []>;
+
+  def TASE_JMP: Ii8PCRel<0xEB, RawFrm, (outs), (ins brtarget8:$dst), "jmp\t$dst", []>;
 
   let Uses = [EFLAGS] in
-  def TASE_JNE : Ii8PCRel<0x75, RawFrm, (outs), (ins brtarget8:$dst), "jne\t$dst",
-                     [(X86brcond bb:$dst, X86_COND_NE, EFLAGS)]>;
+  def TASE_JE : Ii8PCRel<0x74, RawFrm, (outs), (ins brtarget8:$dst), "je\t$dst", []>;
 }
