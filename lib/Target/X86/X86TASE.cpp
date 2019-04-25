@@ -28,7 +28,7 @@ static cl::opt<TASEInstMode, true> TASEInstrumentationModeFlag(
       clEnumValN(TIM_GPR, "gpr", "GPR based TASE taint tracking"),
       clEnumValN(TIM_SIMD, "simd", "SIMD based TASE taint tracking")),
     cl::location(TASEInstrumentationMode),
-    cl::init(TIM_GPR));
+    cl::init(TIM_SIMD));
 
 namespace llvm {
 
