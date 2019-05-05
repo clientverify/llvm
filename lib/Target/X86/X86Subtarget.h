@@ -532,7 +532,7 @@ public:
   PICStyles::Style getPICStyle() const { return PICStyle; }
   void setPICStyle(PICStyles::Style Style)  { PICStyle = Style; }
 
-  bool hasX87() const { return HasX87; }
+  bool hasX87() const { return false; }
   bool hasNOPL() const { return HasNOPL; }
   bool hasCMov() const { return HasCMov; }
   bool hasSSE1() const { return X86SSELevel >= SSE1; }
@@ -546,9 +546,9 @@ public:
   bool hasAVX512() const { return X86SSELevel >= AVX512F; }
   bool hasInt256() const { return hasAVX2(); }
   bool hasSSE4A() const { return HasSSE4A; }
-  bool hasMMX() const { return X863DNowLevel >= MMX; }
-  bool has3DNow() const { return X863DNowLevel >= ThreeDNow; }
-  bool has3DNowA() const { return X863DNowLevel >= ThreeDNowA; }
+  bool hasMMX() const { return false; }
+  bool has3DNow() const { return false; }
+  bool has3DNowA() const { return false; }
   bool hasPOPCNT() const { return HasPOPCNT; }
   bool hasAES() const { return HasAES; }
   bool hasVAES() const { return HasVAES; }

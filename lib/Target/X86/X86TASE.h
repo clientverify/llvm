@@ -25,14 +25,13 @@ constexpr auto array_of(Ts&&... vals) -> std::array<unsigned int, sizeof...(Ts)>
 }
 
 static constexpr size_t NUM_ACCUMULATORS = 2;
-static constexpr unsigned int TASE_REG_TMP = X86::R8 + (REG_TMP - 8);
-static constexpr unsigned int TASE_REG_RET = X86::R8 + (REG_RET - 8);
-static constexpr unsigned int TASE_REG_ACC[] = {
-  X86::R8 + (REG_ACC0 - 8), X86::R8 + (REG_ACC1 - 8) };
+static constexpr unsigned int TASE_REG_TMP = X86::R14;
+static constexpr unsigned int TASE_REG_RET = X86::R15;
+static constexpr unsigned int TASE_REG_ACC[] = {X86::R12, X86::R13};
 
-static constexpr unsigned int TASE_REG_REFERENCE = X86::XMM0 + REG_REFERENCE;
-static constexpr unsigned int TASE_REG_ACCUMULATOR = X86::XMM0 + REG_ACCUMULATOR;
-static constexpr unsigned int TASE_REG_DATA = X86::XMM0 + REG_DATA;
+static constexpr unsigned int TASE_REG_REFERENCE = X86::XMM13;
+static constexpr unsigned int TASE_REG_ACCUMULATOR = X86::XMM14;
+static constexpr unsigned int TASE_REG_DATA = X86::XMM15;
 
 // Ordered by size.
 static constexpr unsigned int TASE_LOADrr[] = {

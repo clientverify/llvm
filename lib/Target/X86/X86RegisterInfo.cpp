@@ -254,9 +254,9 @@ X86RegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
   case X86::GR32RegClassID:
     return 4 - FPDiff;
   case X86::GR64RegClassID:
-    return 12 - FPDiff;
+    return 12 - FPDiff - 2;
   case X86::VR128RegClassID:
-    return Is64Bit ? 10 : 4;
+    return (Is64Bit ? 10 : 4) - 3;
   case X86::VR64RegClassID:
     return 4;
   }
@@ -594,8 +594,6 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 
   // Always reserve the XMM registers because they may be neaded for floating point
   // instrumentation.
-  errs() << TASE_REG_ACCUMULATOR << " " << TASE_REG_REFERENCE << " " << TASE_REG_DATA << "\n";
-  errs() << X86::XMM13 << " " << X86::XMM14 << " " << X86::XMM15 << "\n";
   for (MCRegAliasIterator AI(TASE_REG_ACCUMULATOR, this, true); AI.isValid(); ++AI) {
     Reserved.set(*AI);
   }
@@ -606,9 +604,20 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
     Reserved.set(*AI);
   }
 
+  for (unsigned n = 0; n != 8; ++n) {
+    for (MCRegAliasIterator AI(X86::FP0 + n, this, true); AI.isValid(); ++AI) {
+      Reserved.set(*AI);
+    }
+    for (MCRegAliasIterator AI(X86::MM0 + n, this, true); AI.isValid(); ++AI) {
+      Reserved.set(*AI);
+    }
+  }
+
   assert(checkAllSuperRegsMarked(Reserved,
                                  {X86::SIL, X86::DIL, X86::BPL, X86::SPL,
-                                  X86::SIH, X86::DIH, X86::BPH, X86::SPH}));
+                                  X86::SIH, X86::DIH, X86::BPH, X86::SPH,
+                                  X86::R14B, X86::R15B,
+                                  X86::XMM13, X86::XMM14, X86::XMM15}));
   return Reserved;
 }
 
