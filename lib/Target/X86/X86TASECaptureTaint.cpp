@@ -91,7 +91,12 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
                     << " **********\n");
 
   if (Analysis.isModeledFunction(MF.getName())) {
-    LLVM_DEBUG(dbgs() << "TASE: Function is modeled in the interpreter\n.");
+    LLVM_DEBUG(dbgs() << "TASE: Function is modeled in the interpreter.\n");
+    return false;
+  }
+
+  if (Analysis.getInstrumentationMode() == TIM_NONE) {
+    LLVM_DEBUG(dbgs() << "TASE: Skipping instrumentation by requst.\n");
     return false;
   }
 
@@ -102,6 +107,7 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
 
   bool modified = false;
   for (MachineBasicBlock &MBB : MF) {
+    LLVM_DEBUG(dbgs() << "TASE: Analyzing taint for block " << MBB);
     // Every cartridge entry sequence is going to flush the accumulators.
     Analysis.ResetAccOffsets();
     Analysis.ResetDataOffsets();
@@ -110,21 +116,16 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
     // undocumented property that instr_iterator is not invalidated when
     // one inserts into the list.
     for (MachineInstr &MI : MBB.instrs()) {
-      assert(!(MI.mayLoad() && MI.mayStore()) && "TASE: Somehow we have a CISC instruction!");
+      LLVM_DEBUG(dbgs() << "TASE: Analyzing taint for " << MI);
+      assert(!(MI.mayLoad() && MI.mayStore()) && "TASE: Somehow we have a CISC instruction! ");
       // Only our RISC-like loads should have this set.
       if (!MI.mayLoad() && !MI.mayStore()) {
         // Non-memory instructions need no instrumentation.
         continue;
       }
-      if (!Analysis.isMemInstr(MI.getOpcode())) {
-        MI.dump();
-        MBB.dump();
-        assert(false && "TASE: Encountered an instruction we haven't handled.");
-      }
-      if (Analysis.getInstrumentationMode() != TIM_NONE) {
-        InstrumentInstruction(MI);
-        modified = true;
-      }
+      assert(Analysis.isMemInstr(MI.getOpcode()) && "TASE: Encountered an instruction we haven't handled.");
+      InstrumentInstruction(MI);
+      modified = true;
     }
   }
   return modified;
