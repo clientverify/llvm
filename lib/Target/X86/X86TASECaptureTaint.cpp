@@ -281,12 +281,14 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
   // It is always legal to have instructions with no mem_operands - the
   // rest of the compiler should just deal with it extremely conservatively
   // in terms of alignment and volatility.
+  //
+  // We can optimize the aligned case a bit but usually, we just assume an
+  // unaligned memory operand and re-align it to a 2-byte boundary.
   if (size >= 16) {
     assert(Analysis.getInstrumentationMode() == TIM_SIMD && "TASE: GPR poisnoning not implemented for SIMD registers.");
     assert(size == 16 && "TASE: Unimplemented. Handle YMM/ZMM SIMD instructions properly.");
-    llvm_unreachable("TASE: SIMD reads unimplemed");
-  // } else if we can verify that the read is at least two byte aligned.. {
-  // MOs.append(CurrentMI->operands_begin() + addrOffset, CurrentMI->operands_begin() + addOffset + X86AddrNumOperands);
+    // TODO: Assert that the compiler only emits aligned XMM reads.
+    MOs.append(CurrentMI->operands_begin() + addrOffset, CurrentMI->operands_begin() + addrOffset + X86::AddrNumOperands);
   } else {
     // Precalculate the address, align it to a two byte boundary and then
     // read double the size just to be safe.
