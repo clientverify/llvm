@@ -130,6 +130,8 @@ bool X86TASEDecorateCartridgePass::SplitAtCalls(MachineBasicBlock &MBB) {
         assert(MII->isCall() && "TASE: Bizarre iterator behavior.");
         MII++;
         SplitBefore(&MBB, MII);
+        // TODO: Fix this hack and have the new block properly discovery its live-ins.
+        MII->getParent()->addLiveIn(X86::RAX);
         hasSplit = true;
       } else {
         // Doesn't matter if we're in a termination sequence (I don't know

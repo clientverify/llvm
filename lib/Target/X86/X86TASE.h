@@ -78,6 +78,7 @@ constexpr auto MEM_INSTRS = array_of(
   // point arguments. Opportunisitic optimization attempts are welcome.
 
   // Loads 32-bit values into SIMD registers.
+  // BEWARE: LPS/HPS move 2 single-precision 32-bit values (so moved 64-bit values).
   X86::MOVSSmr, X86::MOVLPSmr, X86::MOVHPSmr,
   X86::VMOVSSmr, X86::VMOVLPSmr, X86::VMOVHPSmr,
   X86::MOVSSrm, X86::MOVLPSrm, X86::MOVHPSrm,

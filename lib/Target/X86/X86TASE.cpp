@@ -124,13 +124,15 @@ size_t TASEAnalysis::getMemFootprint(unsigned int opcode) {
       return 2;
     case X86::MOV32mi: case X86::MOV32mr: case X86::MOV32rm:
     case X86::MOVSX64rm32:
-    case X86::MOVSSmr: case X86::MOVLPSmr: case X86::MOVHPSmr:
-    case X86::VMOVSSmr: case X86::VMOVLPSmr: case X86::VMOVHPSmr:
+    case X86::MOVSSmr:
+    case X86::VMOVSSmr:
     case X86::MOVPDI2DImr: case X86::MOVSS2DImr:
     case X86::VMOVPDI2DImr: case X86::VMOVSS2DImr:
     case X86::PEXTRDmr: case X86::VPEXTRDmr:
       return 4;
     case X86::MOV64mi32: case X86::MOV64mr: case X86::MOV64rm:
+    case X86::MOVLPSmr: case X86::MOVHPSmr:
+    case X86::VMOVLPSmr: case X86::VMOVHPSmr:
     case X86::MOVSDmr: case X86::MOVLPDmr: case X86::MOVHPDmr:
     case X86::VMOVSDmr: case X86::VMOVLPDmr: case X86::VMOVHPDmr:
     case X86::MOVPQIto64mr: case X86::MOVSDto64mr: case X86::MOVPQI2QImr:
