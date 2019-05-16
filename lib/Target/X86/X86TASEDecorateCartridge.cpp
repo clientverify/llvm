@@ -17,6 +17,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
@@ -62,11 +63,13 @@ public:
 private:
   const X86Subtarget *Subtarget;
   const X86InstrInfo *TII;
+  const X86RegisterInfo *TRI;
   TASEAnalysis Analysis;
 
   bool SplitAtCalls(MachineBasicBlock &MBB);
   bool SplitAtSpills(MachineBasicBlock &MBB);
   MachineBasicBlock *SplitBefore(MachineBasicBlock *MBB, MachineBasicBlock::iterator MII);
+  bool isLive(MachineBasicBlock *MBB, unsigned Reg);
 };
 
 } // end anonymous namespace
@@ -85,6 +88,7 @@ bool X86TASEDecorateCartridgePass::runOnMachineFunction(MachineFunction &MF) {
 
   Subtarget = &MF.getSubtarget<X86Subtarget>();
   TII = Subtarget->getInstrInfo();
+  TRI = Subtarget->getRegisterInfo();
 
   bool modified = false;
 
@@ -130,8 +134,6 @@ bool X86TASEDecorateCartridgePass::SplitAtCalls(MachineBasicBlock &MBB) {
         assert(MII->isCall() && "TASE: Bizarre iterator behavior.");
         MII++;
         SplitBefore(&MBB, MII);
-        // TODO: Fix this hack and have the new block properly discovery its live-ins.
-        MII->getParent()->addLiveIn(X86::RAX);
         hasSplit = true;
       } else {
         // Doesn't matter if we're in a termination sequence (I don't know
@@ -217,7 +219,51 @@ MachineBasicBlock *X86TASEDecorateCartridgePass::SplitBefore(
   // Move all instructions starting at MII (including MII) until the end of
   // this MBB into the new MBB.
   newMBB->splice(newMBB->end(), MBB, MII, MBB->end());
+
+  // TODO: There is probably a better function to compute this but we simply
+  // manually walk through all the callee saved registers to check what's still
+  // live after a call.
+  LLVM_DEBUG(dbgs() << "TASE: Computing liveness for " << *newMBB);
+  for (const MCPhysReg *CSR = MF->getRegInfo().getCalleeSavedRegs();
+       unsigned Reg = *CSR; ++CSR) {
+    if (isLive(newMBB, Reg)) {
+      LLVM_DEBUG(dbgs() << "  -> TASE: Register " << printReg(Reg) << " is live.\n");
+      newMBB->addLiveIn(Reg);
+    } else {
+      LLVM_DEBUG(dbgs() << "  -> TASE: Register " << printReg(Reg) << " is dead.\n");
+    }
+  }
+
   return newMBB;
+}
+
+bool X86TASEDecorateCartridgePass::isLive(MachineBasicBlock *MBB, unsigned Reg) {
+  // We use fragments and fixes from commit 556673f9, 23c93c1752 and 7a455510
+  // to accurately forward scan to detect the liveness of callee saved registers.
+  MachineBasicBlock::const_iterator I = MBB->begin();
+  for (; I != MBB->end(); ++I) {
+    if (I->isDebugInstr()) continue;
+
+    MachineOperandIteratorBase::PhysRegInfo Info = ConstMIOperands(*I).analyzePhysReg(Reg, TRI);
+    // Register is live when we read it here.
+    if (Info.Read) {
+      return true;
+    }
+    // Register is dead if we can fully overwrite or clobber it here.
+    else if (Info.FullyDefined || Info.Clobbered) {
+      return false;
+    }
+  }
+  // If we reached the end, it is safe to clobber Reg at the end of a block of
+  // no successor has it live in.
+  assert(I == MBB->end());
+  for (MachineBasicBlock *S : MBB->successors()) {
+    for (const MachineBasicBlock::RegisterMaskPair &LI : S->liveins()) {
+      if (TRI->regsOverlap(LI.PhysReg, Reg))
+        return true;
+    }
+  }
+  return false;
 }
 
 INITIALIZE_PASS(X86TASEDecorateCartridgePass, PASS_KEY, PASS_DESC, false, false)
