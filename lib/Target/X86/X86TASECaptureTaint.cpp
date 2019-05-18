@@ -296,7 +296,8 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
     // If this address operand is just a register, we can skip the lea. But don't do this if
     // EFLAGS is dead and we want to not emit shrx.
     unsigned int AddrReg = getAddrReg(addrOffset);
-    bool eflags_dead = TII->isSafeToClobberEFLAGS(*CurrentMI->getParent(), MachineBasicBlock::iterator(CurrentMI));
+    //bool eflags_dead = TII->isSafeToClobberEFLAGS(*CurrentMI->getParent(), MachineBasicBlock::iterator(CurrentMI));
+    bool eflags_dead = false;
     if (AddrReg == X86::NoRegister || eflags_dead) {
       AddrReg = TASE_REG_TMP;
       MachineInstrBuilder MIB = InsertInstr(X86::LEA64r, TASE_REG_TMP);

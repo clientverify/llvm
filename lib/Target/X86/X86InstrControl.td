@@ -423,6 +423,7 @@ let isCodeGenOnly = 1, hasSideEffects = 1 in {
                       []>;
 
   let Uses = [EFLAGS] in
-  def TASE_JNE : Ii8PCRel<0x75, RawFrm, (outs), (ins brtarget8:$dst), "jne\t$dst",
-                     [(X86brcond bb:$dst, X86_COND_NE, EFLAGS)]>;
+  def TASE_JNE : Ii32PCRel<0x85, RawFrm, (outs), (ins brtarget32:$dst), "jne\t$dst",
+                     [(X86brcond bb:$dst, X86_COND_NE, EFLAGS)]>, OpSize32, TB;
+
 }
