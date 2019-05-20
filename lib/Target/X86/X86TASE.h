@@ -115,12 +115,18 @@ constexpr auto MEM_INSTRS = array_of(
   X86::VPINSRBrm, X86::VPINSRWrm, X86::VPINSRDrm, X86::VPINSRQrm
   );
 
+constexpr auto SAFE_INSTRS = array_of(
+  X86::TAILJMPd, X86::TAILJMPr, X86::TAILJMPd_CC,
+  X86::TAILJMPd64, X86::TAILJMPr64, X86::TAILJMPr64_REX, X86::TAILJMPd64_CC
+  );
+
 class TASEAnalysis {
 public:
   TASEAnalysis();
 
   bool isModeledFunction(StringRef name);
   bool isMemInstr(unsigned int opcode);
+  bool isSafeInstr(unsigned int opcode);
   size_t getMemFootprint(unsigned int opcode);
 
   // These functions only make sense in GPR instrumentation mode.
@@ -142,16 +148,20 @@ public:
 private:
   // Use C++11 trickery to extract the size of the array above at compile time.
   using meminstrs_t = std::array<unsigned int, MEM_INSTRS.size()>;
+  using safeinstrs_t = std::array<unsigned int, SAFE_INSTRS.size()>;
 
   uint8_t AccumulatorBytes[NUM_ACCUMULATORS];
   unsigned int DataUsageMask;
 
   static void initModeledFunctions();
   static void initMemInstrs();
+  static void initSafeInstrs();
   static bool uncachedModeledFunctions;
   static bool uncachedMemInstrs;
+  static bool uncachedSafeInstrs;
   static std::vector<std::string> ModeledFunctions;
   static meminstrs_t MemInstrs;
+  static safeinstrs_t SafeInstrs;
 };
 
 }

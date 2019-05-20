@@ -124,6 +124,9 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
         // Non-memory instructions need no instrumentation.
         continue;
       }
+      if (Analysis.isSafeInstr(MI.getOpcode())) {
+        continue;
+      }
       assert(Analysis.isMemInstr(MI.getOpcode()) && "TASE: Encountered an instruction we haven't handled.");
       InstrumentInstruction(MI);
       modified = true;

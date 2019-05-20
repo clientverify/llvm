@@ -34,8 +34,10 @@ namespace llvm {
 
 bool TASEAnalysis::uncachedModeledFunctions(true);
 bool TASEAnalysis::uncachedMemInstrs(true);
+bool TASEAnalysis::uncachedSafeInstrs(true);
 std::vector<std::string> TASEAnalysis::ModeledFunctions = {};
 TASEAnalysis::meminstrs_t TASEAnalysis::MemInstrs(MEM_INSTRS);
+TASEAnalysis::safeinstrs_t TASEAnalysis::SafeInstrs(SAFE_INSTRS);
 
 void TASEAnalysis::initModeledFunctions() {
   assert(uncachedModeledFunctions);
@@ -69,6 +71,12 @@ void TASEAnalysis::initMemInstrs() {
   uncachedMemInstrs = false;
 }
 
+void TASEAnalysis::initSafeInstrs() {
+  assert(uncachedSafeInstrs);
+  std::sort(SafeInstrs.begin(), SafeInstrs.end());
+  uncachedSafeInstrs = false;
+}
+
 TASEInstMode TASEAnalysis::getInstrumentationMode() {
   return TASEInstrumentationMode;
 }
@@ -91,6 +99,13 @@ bool TASEAnalysis::isMemInstr(unsigned int opcode) {
     initMemInstrs();
   }
   return std::binary_search(MemInstrs.begin(), MemInstrs.end(), opcode);
+}
+
+bool TASEAnalysis::isSafeInstr(unsigned int opcode) {
+  if (uncachedSafeInstrs) {
+    initSafeInstrs();
+  }
+  return std::binary_search(SafeInstrs.begin(), SafeInstrs.end(), opcode);
 }
 
 size_t TASEAnalysis::getMemFootprint(unsigned int opcode) {
