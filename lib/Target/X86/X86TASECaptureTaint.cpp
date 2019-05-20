@@ -120,7 +120,7 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
       LLVM_DEBUG(dbgs() << "TASE: Analyzing taint for " << MI);
       assert(!(MI.mayLoad() && MI.mayStore()) && "TASE: Somehow we have a CISC instruction! ");
       // Only our RISC-like loads should have this set.
-      if (!MI.mayLoad() && !MI.mayStore()) {
+      if (!MI.mayLoad() && !MI.mayStore() && !MI.isCall() && !MI.isReturn() && !MI.hasUnmodeledSideEffects()) {
         // Non-memory instructions need no instrumentation.
         continue;
       }
@@ -160,7 +160,7 @@ void X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
       PoisonCheckStack(0);
       break;
     case X86::CALLpcrel16:
-    case X86::CALLpcrel32:
+    case X86::CALL64pcrel32:
     case X86::CALL64r:
       // Fixed addresses cannot be symbolic. Indirect calls are detected as
       // symbolic when their base address is loaded and calculated.
