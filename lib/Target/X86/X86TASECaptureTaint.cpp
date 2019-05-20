@@ -127,6 +127,10 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
       if (Analysis.isSafeInstr(MI.getOpcode())) {
         continue;
       }
+      if (MI.hasUnmodeledSideEffects() && !Analysis.isMemInstr(MI.getOpcode())) {
+        errs() << "TASE: An instruction with potentially unwanted side-effects is emitted. " << MI;
+        continue;
+      }
       assert(Analysis.isMemInstr(MI.getOpcode()) && "TASE: Encountered an instruction we haven't handled.");
       InstrumentInstruction(MI);
       modified = true;
