@@ -2586,6 +2586,8 @@ bool X86DAGToDAGISel::foldLoadStoreIntoMemOperand(SDNode *Node) {
   SDValue StoredVal = StoreNode->getOperand(1);
   unsigned Opc = StoredVal->getOpcode();
 
+  // TASE: Do no actually fold anything...  STAHP!
+  return false;
   // Before we try to select anything, make sure this is memory operand size
   // and opcode we can handle. Note that this must match the code below that
   // actually lowers the opcodes.
