@@ -225,6 +225,7 @@ void X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
     case X86::VMOVAPSrm: case X86::VMOVAPDrm: case X86::VMOVDQArm:
     case X86::PINSRWrm: case X86::PINSRDrm: case X86::PINSRQrm:
     case X86::VPINSRWrm: case X86::VPINSRDrm: case X86::VPINSRQrm:
+    case X86::INSERTPSrm: case X86::VINSERTPSrm:
       PoisonCheckReg(size);
       break;
     //case X86::VMOVUPSYmr: case X86::VMOVUPDYmr: case X86::VMOVDQUYmr:
@@ -411,7 +412,7 @@ void X86TASECaptureTaintPass::PoisonCheckReg(size_t size, unsigned int align) {
 void X86TASECaptureTaintPass::PoisonCheckRegInternal(size_t size, unsigned int reg, unsigned int acc_idx) {
   assert(reg != X86::NoRegister);
   if (size >= 16) {
-    assert(Analysis.getInstrumentationMode() == TIM_SIMD && "TASE: GPR poisnoning not implemented for SIMD registers.");
+    assert(Analysis.getInstrumentationMode() == TIM_SIMD && "TASE: GPR poisoning not implemented for SIMD registers.");
     assert(size == 16 && "TASE: Handle AVX instructions");
     InsertInstr(X86::VPCMPEQWrr, TASE_REG_DATA)
       .addReg(TASE_REG_REFERENCE)

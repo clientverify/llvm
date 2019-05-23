@@ -17371,6 +17371,7 @@ SDValue X86TargetLowering::LowerSINT_TO_FP(SDValue Op,
 SDValue X86TargetLowering::BuildFILD(SDValue Op, EVT SrcVT, SDValue Chain,
                                      SDValue StackSlot,
                                      SelectionDAG &DAG) const {
+  llvm_unreachable("TASE: For some reason we are attempting to emit an x87 80-bit instruction. Check if a constant is marked with type long double (L suffix)");
   // Build the FILD
   SDLoc DL(Op);
   SDVTList Tys;

@@ -172,6 +172,7 @@ size_t TASEAnalysis::getMemFootprint(unsigned int opcode) {
     case X86::VMOVAPSrm: case X86::VMOVAPDrm: case X86::VMOVDQArm:
     case X86::PINSRWrm: case X86::PINSRDrm: case X86::PINSRQrm:
     case X86::VPINSRWrm: case X86::VPINSRDrm: case X86::VPINSRQrm:
+    case X86::INSERTPSrm: case X86::VINSERTPSrm:
       return 16;
     case X86::VMOVUPSYmr: case X86::VMOVUPDYmr: case X86::VMOVDQUYmr:
     case X86::VMOVAPSYmr: case X86::VMOVAPDYmr: case X86::VMOVDQAYmr:

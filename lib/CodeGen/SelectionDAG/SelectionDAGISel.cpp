@@ -3832,6 +3832,8 @@ void SelectionDAGISel::CannotYetSelect(SDNode *N) {
     else
       Msg << "unknown intrinsic #" << iid;
   }
+  errs() << Msg.str();
+  // llvm_unreachable("TASE: FUCK THIS FUCKING BULLSHIT!");
   report_fatal_error(Msg.str());
 }
 

@@ -223,6 +223,7 @@ MachineBasicBlock *X86TASEDecorateCartridgePass::SplitBefore(
   // TODO: There is probably a better function to compute this but we simply
   // manually walk through all the callee saved registers to check what's still
   // live after a call.
+  // See X86CallLowering.cpp and the CallingConv infrastruction and its *Handlers.
   LLVM_DEBUG(dbgs() << "TASE: Computing liveness for " << *newMBB);
   for (const MCPhysReg *CSR = MF->getRegInfo().getCalleeSavedRegs();
        unsigned Reg = *CSR; ++CSR) {
@@ -231,6 +232,12 @@ MachineBasicBlock *X86TASEDecorateCartridgePass::SplitBefore(
       newMBB->addLiveIn(Reg);
     } else {
       LLVM_DEBUG(dbgs() << "  -> TASE: Register " << printReg(Reg) << " is dead.\n");
+    }
+  }
+  // rax, rdx, xmm0 and xmm1 are caller saved but hold live return values if present.
+  for (unsigned Reg : {X86::RAX, X86::RDX, X86::XMM0, X86::XMM1}) {
+    if (isLive(newMBB, Reg)) {
+      newMBB->addLiveIn(Reg);
     }
   }
 

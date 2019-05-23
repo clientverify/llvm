@@ -337,6 +337,7 @@ let isCall = 1, Uses = [RSP, SSP], SchedRW = [WriteJump] in {
 
   // Non-tracking calls for IBT, use with caution.
   let isCodeGenOnly = 1 in {
+    let isAllowedMemInstr = 1 in
     def CALL64r_NT : I<0xFF, MRM2r, (outs), (ins GR64 : $dst),
                       "call{q}\t{*}$dst",[(X86NoTrackCall GR64 : $dst)]>,
                       Requires<[In64BitMode]>, NOTRACK;

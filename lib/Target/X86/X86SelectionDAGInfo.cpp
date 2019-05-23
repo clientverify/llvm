@@ -270,6 +270,7 @@ SDValue X86SelectionDAGInfo::EmitTargetCodeForMemcpy(
 
   SDVTList Tys = DAG.getVTList(MVT::Other, MVT::Glue);
   SDValue Ops[] = { Chain, DAG.getValueType(Repeats.AVT), InFlag };
+  //TASE: TODO/FIX
   SDValue RepMovs = DAG.getNode(X86ISD::REP_MOVS, dl, Tys, Ops);
 
   SmallVector<SDValue, 4> Results;
