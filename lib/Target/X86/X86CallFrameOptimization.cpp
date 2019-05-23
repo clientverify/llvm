@@ -548,8 +548,9 @@ void X86CallFrameOptimization::adjustCallSequence(MachineFunction &MF,
 
       // Check that this is legal to fold. Right now, we're extremely
       // conservative about that.
+      // TASE: We don't allow push folding.
       MachineInstr *DefMov = nullptr;
-      if (!SlowPUSHrmm && (DefMov = canFoldIntoRegPush(FrameSetup, Reg))) {
+      if (false && !SlowPUSHrmm && (DefMov = canFoldIntoRegPush(FrameSetup, Reg))) {
         PushOpcode = Is64Bit ? X86::PUSH64rmm : X86::PUSH32rmm;
         Push = BuildMI(MBB, Context.Call, DL, TII->get(PushOpcode));
 

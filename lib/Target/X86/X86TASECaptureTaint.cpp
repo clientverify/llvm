@@ -118,7 +118,10 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
     // one inserts into the list.
     for (MachineInstr &MI : MBB.instrs()) {
       LLVM_DEBUG(dbgs() << "TASE: Analyzing taint for " << MI);
-      assert(!(MI.mayLoad() && MI.mayStore()) && "TASE: Somehow we have a CISC instruction! ");
+      if (MI.mayLoad() && MI.mayStore()) {
+        errs() << "TASE: Somehow we have a CISC instruction! " << MI;
+        llvm_unreachable("TASE: Please handle this instruction.");
+      }
       // Only our RISC-like loads should have this set.
       if (!MI.mayLoad() && !MI.mayStore() && !MI.isCall() && !MI.isReturn() && !MI.hasUnmodeledSideEffects()) {
         // Non-memory instructions need no instrumentation.
