@@ -119,6 +119,13 @@ SDValue X86SelectionDAGInfo::EmitTargetCodeForMemset(
     return SDValue();
   }
 
+  // TASE: We are not supporting REP_STOS/REP_MOVS right now due to the potential
+  // for a large read/write that exceeds the size of L1.
+  // TODO: This codepath is only taken for a given constant size and a possibly
+  // known offset. Investigate whether we can optimize for that use case for
+  // small sizes or if the automatic inliner work this out automatically.
+  return SDValue();
+
   uint64_t SizeVal = ConstantSize->getZExtValue();
   SDValue InFlag;
   EVT AVT;
@@ -234,6 +241,13 @@ SDValue X86SelectionDAGInfo::EmitTargetCodeForMemcpy(
   if (isBaseRegConflictPossible(DAG, ClobberSet))
     return SDValue();
 
+  // TASE: We are not supporting REP_STOS/REP_MOVS right now due to the potential
+  // for a large read/write that exceeds the size of L1.
+  // TODO: This codepath is only taken for a given constant size and a possibly
+  // known offset. Investigate whether we can optimize for that use case for
+  // small sizes or if the automatic inliner work this out automatically.
+  return SDValue();
+
   // If the target has enhanced REPMOVSB, then it's at least as fast to use
   // REP MOVSB instead of REP MOVS{W,D,Q}, and it avoids having to handle
   // BytesLeft.
@@ -270,7 +284,6 @@ SDValue X86SelectionDAGInfo::EmitTargetCodeForMemcpy(
 
   SDVTList Tys = DAG.getVTList(MVT::Other, MVT::Glue);
   SDValue Ops[] = { Chain, DAG.getValueType(Repeats.AVT), InFlag };
-  //TASE: TODO/FIX
   SDValue RepMovs = DAG.getNode(X86ISD::REP_MOVS, dl, Tys, Ops);
 
   SmallVector<SDValue, 4> Results;
