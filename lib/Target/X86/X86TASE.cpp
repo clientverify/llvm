@@ -51,7 +51,10 @@ void TASEAnalysis::initModeledFunctions() {
     std::move(MemoryBuffer::getFile(TASEModeledFunctionsFile).get());
 
   for(line_iterator I = line_iterator(*MB); !I.is_at_eof(); I++) {
-    ModeledFunctions.push_back(I->str());
+    std::string name = I->str();
+    name.erase(0, name.find_first_not_of("\t\n\v\f\r "));
+    name.erase(name.find_last_not_of("\t\n\v\f\r ,"));
+    ModeledFunctions.push_back(name);
   }
 
   std::sort(ModeledFunctions.begin(), ModeledFunctions.end());
