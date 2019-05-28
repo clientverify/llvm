@@ -99,7 +99,7 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard(const cha
   // attached to the first instruction in the block.
   MachineBasicBlock *MBB = FirstMI->getParent();
   MachineFunction *MF = MBB->getParent();
-  MCCartridgeRecord *cartridge = MF->getContext().createCartridgeRecord(MBB->getSymbol());
+  MCCartridgeRecord *cartridge = MF->getContext().createCartridgeRecord(MBB->getSymbol(), MF->getName());
 
   // Load the body address into GPR_RET.
   InsertInstr(X86::LEA64r, TASE_REG_RET)
@@ -152,7 +152,7 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
   if (Analysis.isModeledFunction(MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Adding prolog to modeled function\n.");
     FirstMI = &MF.front().front();
-    EmitSpringboard("sb_modeled");
+    EmitSpringboard("sb_modeled")->Modeled = true;
   } else {
     for (MachineBasicBlock &MBB : MF) {
       FirstMI = &MBB.front();

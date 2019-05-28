@@ -22,3 +22,7 @@ MCSymbol *MCCartridgeRecord::End() {
 MCSymbol *MCCartridgeRecord::BodyPostDebug() {
   return Ctx->getOrCreateSymbol(BB->getName() + "_CartridgeBodyPostDebug");
 }
+
+MCSymbol *MCCartridgeRecord::ModeledRecord() {
+  return Ctx->getOrCreateSymbol("tase_modeled_record_" + MF);
+}

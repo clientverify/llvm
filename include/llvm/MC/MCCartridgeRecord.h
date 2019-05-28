@@ -12,17 +12,21 @@ namespace llvm {
   class MCCartridgeRecord {
   public:
     MCCartridgeRecord() = delete;
-    MCCartridgeRecord(MCSymbol *bb, MCContext *ctx):
-      BB(bb), Ctx(ctx) {}
+    MCCartridgeRecord(MCSymbol *bb, StringRef mf, MCContext *ctx):
+      Modeled(false), BB(bb), MF(mf), Ctx(ctx) {}
     ~MCCartridgeRecord() {}
 
     MCSymbol *Cartridge();
     MCSymbol *Body();
     MCSymbol *End();
     MCSymbol *BodyPostDebug();
+    MCSymbol *ModeledRecord();
+
+    bool     Modeled;
 
   private:
     MCSymbol *BB;
+    StringRef MF;
     MCContext *Ctx;
   };
 }

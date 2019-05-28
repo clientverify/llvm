@@ -53,7 +53,12 @@ void TASEAnalysis::initModeledFunctions() {
   for(line_iterator I = line_iterator(*MB); !I.is_at_eof(); I++) {
     std::string name = I->str();
     name.erase(0, name.find_first_not_of("\t\n\v\f\r "));
-    name.erase(name.find_last_not_of("\t\n\v\f\r ,"));
+    name.erase(name.find_last_not_of("\t\n\v\f\r ") + 1);
+    if (name.find("(")) {
+      name.erase(0, name.find_last_of("(") + 1);
+      assert(name.find(")") && "TASE: Modeled function file malformed - cannot find ) matching (");
+      name.erase(name.find_first_of(")"));
+    }
     ModeledFunctions.push_back(name);
   }
 

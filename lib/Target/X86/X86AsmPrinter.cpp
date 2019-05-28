@@ -722,6 +722,12 @@ void X86AsmPrinter::EmitTASECartridgeRecords() {
   OutStreamer->AddBlankLine();
 
   for (MCCartridgeRecord *record : *records) {
+    if (record->Modeled) {
+      MCSymbol *MR = record->ModeledRecord();
+      OutStreamer->EmitSymbolAttribute(MR, MCSA_Global);
+      OutStreamer->EmitSymbolAttribute(MR, MCSA_ELF_TypeObject);
+      OutStreamer->EmitLabel(MR);
+    }
     OutStreamer->EmitSymbolValue(record->Cartridge(), 4);
     OutStreamer->emitAbsoluteSymbolDiff(record->Body(), record->Cartridge(), 2);
     OutStreamer->emitAbsoluteSymbolDiff(record->End(), record->Body(), 2);

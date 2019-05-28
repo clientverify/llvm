@@ -135,8 +135,8 @@ MCSymbol *MCContext::getOrCreateSymbol(const Twine &Name) {
   return Sym;
 }
 
-MCCartridgeRecord *MCContext::createCartridgeRecord(MCSymbol *cartridge) {
-  MCCartridgeRecord *record = new (*this) MCCartridgeRecord(cartridge, this);
+MCCartridgeRecord *MCContext::createCartridgeRecord(MCSymbol *cartridge, StringRef function) {
+  MCCartridgeRecord *record = new (*this) MCCartridgeRecord(cartridge, function, this);
   CartridgeRecords.push_back(record);
   return record;
 }
