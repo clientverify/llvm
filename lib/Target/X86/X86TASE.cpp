@@ -187,11 +187,11 @@ size_t TASEAnalysis::getMemFootprint(unsigned int opcode) {
 /* -- GPR ------------------------------------------------------------------- */
 int TASEAnalysis::AllocateAccOffset(size_t bytes) {
   assert(bytes && " TASE: Cannot instrument instruction with unknown operand bytes.");
-  assert(bytes <= REG_SIZE && "TASE: Cannot currently handle SIMD values or larger.");
+  assert(bytes <= GREG_SIZE && "TASE: Cannot currently handle SIMD values or larger.");
   assert(bytes > 1 && "TASE: Cannot do single byte taint checks.");
 
   for (int i = 0; i < static_cast<int>(NUM_ACCUMULATORS); i++) {
-    if (AccumulatorBytes[i] + bytes <= REG_SIZE) {
+    if (AccumulatorBytes[i] + bytes <= GREG_SIZE) {
       AccumulatorBytes[i] += bytes;
       return i;
     }

@@ -69,7 +69,7 @@ private:
 
   TASEAnalysis Analysis;
 
-  MCCartridgeRecord *EmitSpringboard();
+  MCCartridgeRecord *EmitSpringboard(const char *label);
   MachineInstrBuilder InsertInstr(
       unsigned int opcode, unsigned int destReg = X86::NoRegister, MachineInstr *MI = nullptr);
 };
@@ -92,7 +92,7 @@ MachineInstrBuilder X86TASEAddCartridgeSpringboardPass::InsertInstr(
   }
 }
 
-MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard() {
+MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard(const char *label) {
   // We run after cartridge splitting - this guarantees that each machine block
   // has at least one instruction.  It also guarantees that every basic block
   // is a cartridge.  So just add the BB to our record along with a label
@@ -113,7 +113,7 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard() {
     .addReg(X86::NoRegister)    // base
     .addImm(1)                  // scale
     .addReg(X86::NoRegister)    // index
-    .addExternalSymbol("tase_springboard") // offset
+    .addExternalSymbol(label)   // offset
     .addReg(X86::NoRegister);   // segment
 
   //MachineInstr *cartridgeBodyPDMI = &firstMI;
@@ -151,30 +151,12 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
 
   if (Analysis.isModeledFunction(MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Adding prolog to modeled function\n.");
-    // To make our debug scenarios work well, we jump to sb_modeled (a helper)
-    // only if springboard is not disabled.  We assume TASE_REG_RET is already
-    // valid and pointing to the cartridge body.
-    //
-    // Note: testing for sb_reopen should be conceptually considered as equal
-    // to an xtest.
     FirstMI = &MF.front().front();
-    // Exploit the fact that we are using a small code model and implicit
-    // zero extension to shorten our instructions.
-    InsertInstr(X86::CMP32mi)
-      .addReg(X86::NoRegister)    // base
-      .addImm(1)                  // scale
-      .addReg(X86::NoRegister)    // index
-      .addExternalSymbol("tase_springboard") // offset
-      .addReg(X86::NoRegister)    // segment
-      .addExternalSymbol("sb_disabled");
-    InsertInstr(X86::TASE_JNE)
-      .addExternalSymbol("sb_modeled");
-    FirstMI = &MF.front().front();
-    EmitSpringboard();
+    EmitSpringboard("sb_modeled");
   } else {
     for (MachineBasicBlock &MBB : MF) {
       FirstMI = &MBB.front();
-      EmitSpringboard();
+      EmitSpringboard("tase_springboard");
     }
   }
   FirstMI = nullptr;
