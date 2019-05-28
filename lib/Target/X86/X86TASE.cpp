@@ -127,6 +127,7 @@ size_t TASEAnalysis::getMemFootprint(unsigned int opcode) {
     case X86::CALLpcrel16:
     case X86::CALL64pcrel32:
     case X86::CALL64r:
+    case X86::CALL64r_NT:
     case X86::POP64r:
     case X86::PUSH64i8:
     case X86::PUSH64i32:

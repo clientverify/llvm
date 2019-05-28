@@ -31,6 +31,12 @@ using namespace llvm;
 #define PASS_DESC "X86 MBB to TASE Cartridge conversion pass."
 #define DEBUG_TYPE PASS_KEY
 
+bool TASEParanoidControlFlow;
+static cl::opt<bool, true> TASEParanoidControlFlowFlag(
+    "x86-tase-paranoid-control-flow",
+    cl::desc("Isolate indirect control flow transfers - rets and calls."),
+    cl::location(TASEParanoidControlFlow),
+    cl::init(true));
 
 namespace llvm {
 
@@ -68,6 +74,7 @@ private:
 
   bool SplitAtCalls(MachineBasicBlock &MBB);
   bool SplitAtSpills(MachineBasicBlock &MBB);
+  bool SplitBeforeIndirectFlow(MachineBasicBlock &MBB);
   MachineBasicBlock *SplitBefore(MachineBasicBlock *MBB, MachineBasicBlock::iterator MII);
   bool isLive(MachineBasicBlock *MBB, unsigned Reg);
 };
@@ -106,11 +113,48 @@ bool X86TASEDecorateCartridgePass::runOnMachineFunction(MachineFunction &MF) {
       }
     }
 
+    if (TASEParanoidControlFlow) {
+      for (MachineBasicBlock &MBB : MF) {
+        modified |= SplitBeforeIndirectFlow(MBB);
+      }
+    }
+
     // Make the blocks monotonic again.
     MF.RenumberBlocks();
   }
   return modified;
 }
+
+bool X86TASEDecorateCartridgePass::SplitBeforeIndirectFlow(MachineBasicBlock &MBB) {
+  bool hasSplit = false;
+  bool hasInstr = false;
+
+  MachineBasicBlock *pMBB = &MBB;
+
+  for (auto MII = pMBB->instr_begin(); MII != pMBB->instr_end(); MII++) {
+    if (MII->isDebugInstr()) {
+      continue;
+    }
+    switch (MII->getOpcode()) {
+    case X86::CALL64r:
+    case X86::CALL64r_NT:
+    case X86::RETQ:
+    case X86::TAILJMPr64:
+    case X86::TAILJMPr64_REX:
+    case X86::JMP64r:
+    case X86::JMP64r_NT:
+      if (hasInstr) {
+        pMBB = SplitBefore(pMBB, MachineBasicBlock::iterator(MII));
+        MII = pMBB->instr_begin();
+        hasSplit = true;
+      }
+    default:
+      hasInstr = true;
+    }
+  }
+  return hasSplit;
+}
+
 
 bool X86TASEDecorateCartridgePass::SplitAtCalls(MachineBasicBlock &MBB) {
   bool hasSplit = false;;

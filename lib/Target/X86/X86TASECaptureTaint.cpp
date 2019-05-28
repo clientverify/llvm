@@ -172,6 +172,7 @@ void X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
     case X86::CALLpcrel16:
     case X86::CALL64pcrel32:
     case X86::CALL64r:
+    case X86::CALL64r_NT:
       // Fixed addresses cannot be symbolic. Indirect calls are detected as
       // symbolic when their base address is loaded and calculated.
       // A stack push is performed during a call and since we don't sweep old

@@ -59,7 +59,7 @@ static constexpr unsigned int TASE_PINSRrm[] = {
 // Only 64-bit values are considered here.
 // In C++17, we could have directly sorted this array...  no such luck here.
 constexpr auto MEM_INSTRS = array_of(
-  X86::RETQ, X86::CALLpcrel16, X86::CALL64pcrel32, X86::CALL64r, X86::FARCALL64,
+  X86::RETQ, X86::CALLpcrel16, X86::CALL64pcrel32, X86::CALL64r, X86::CALL64r_NT, X86::FARCALL64,
   X86::POP64r, X86::PUSH64r, X86::PUSH64i8, X86::PUSH64i32,
   X86::PUSHF64, X86::POPF64,
   // Must allow loads and stores of GPRs and immediates.
