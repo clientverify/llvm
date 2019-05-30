@@ -12,7 +12,7 @@ namespace llvm {
   class MCCartridgeRecord {
   public:
     MCCartridgeRecord() = delete;
-    MCCartridgeRecord(MCSymbol *bb, StringRef mf, MCContext *ctx):
+    MCCartridgeRecord(MCSymbol *bb, std::string mf, MCContext *ctx):
       Modeled(false), BB(bb), MF(mf), Ctx(ctx) {}
     ~MCCartridgeRecord() {}
 
@@ -26,7 +26,7 @@ namespace llvm {
 
   private:
     MCSymbol *BB;
-    StringRef MF;
+    std::string MF;
     MCContext *Ctx;
   };
 }

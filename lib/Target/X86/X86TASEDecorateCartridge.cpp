@@ -148,6 +148,9 @@ bool X86TASEDecorateCartridgePass::SplitBeforeIndirectFlow(MachineBasicBlock &MB
         MII = pMBB->instr_begin();
         hasSplit = true;
       }
+      // Because MII will be incremented and therefore, we will always have
+      // an instruction.
+      LLVM_FALLTHROUGH;
     default:
       hasInstr = true;
     }
@@ -264,22 +267,16 @@ MachineBasicBlock *X86TASEDecorateCartridgePass::SplitBefore(
   // this MBB into the new MBB.
   newMBB->splice(newMBB->end(), MBB, MII, MBB->end());
 
-  // TODO: There is probably a better function to compute this but we simply
-  // manually walk through all the callee saved registers to check what's still
-  // live after a call.
+  // Just iterate *all* registers to see what's live and what isn't.
   // See X86CallLowering.cpp and the CallingConv infrastruction and its *Handlers.
+  // Not sure how to get all the top-level registers - we do our best for now.
   LLVM_DEBUG(dbgs() << "TASE: Computing liveness for " << *newMBB);
-  for (const MCPhysReg *CSR = MF->getRegInfo().getCalleeSavedRegs();
-       unsigned Reg = *CSR; ++CSR) {
+  for (unsigned Reg : X86::GR64_NOSPRegClass) {
     if (isLive(newMBB, Reg)) {
-      LLVM_DEBUG(dbgs() << "  -> TASE: Register " << printReg(Reg) << " is live.\n");
       newMBB->addLiveIn(Reg);
-    } else {
-      LLVM_DEBUG(dbgs() << "  -> TASE: Register " << printReg(Reg) << " is dead.\n");
     }
   }
-  // rax, rdx, xmm0 and xmm1 are caller saved but hold live return values if present.
-  for (unsigned Reg : {X86::RAX, X86::RDX, X86::XMM0, X86::XMM1}) {
+  for (unsigned Reg : X86::VR128RegClass) {
     if (isLive(newMBB, Reg)) {
       newMBB->addLiveIn(Reg);
     }

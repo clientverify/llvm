@@ -345,7 +345,7 @@ namespace llvm {
 
     /// Create the symbols for a new cartridge. You will need to actually emit the
     /// symbols at the right place.
-    MCCartridgeRecord *createCartridgeRecord(MCSymbol *cartridge, StringRef function);
+    MCCartridgeRecord *createCartridgeRecord(MCSymbol *cartridge, std::string function);
 
     /// All cartridge records accumulated so far.
     const std::vector<MCCartridgeRecord *> *getAllCartridgeRecords() const;
