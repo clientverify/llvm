@@ -5187,6 +5187,7 @@ multiclass SS41I_pmovx_rrrm<bits<8> opc, string OpcodeStr, X86MemOperand MemOp,
                  !strconcat(OpcodeStr, "\t{$src, $dst|$dst, $src}"), []>,
                  Sched<[sched]>;
 
+  let isAllowedMemInstr = 1 in
   def rm : SS48I<opc, MRMSrcMem, (outs OutRC:$dst), (ins MemOp:$src),
                  !strconcat(OpcodeStr, "\t{$src, $dst|$dst, $src}"), []>,
                  Sched<[sched.Folded]>;

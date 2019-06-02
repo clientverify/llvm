@@ -80,40 +80,66 @@ constexpr auto MEM_INSTRS = array_of(
   // Loads 32-bit values into SIMD registers.
   // BEWARE: LPS/HPS move 2 single-precision 32-bit values (so moved 64-bit values).
   X86::MOVSSmr, X86::MOVLPSmr, X86::MOVHPSmr,
-  X86::VMOVSSmr, X86::VMOVLPSmr, X86::VMOVHPSmr,
+  //X86::VMOVSSmr, X86::VMOVLPSmr, X86::VMOVHPSmr,
   X86::MOVSSrm, X86::MOVLPSrm, X86::MOVHPSrm,
-  X86::VMOVSSrm, X86::VMOVLPSrm, X86::VMOVHPSrm,
+  //X86::VMOVSSrm, X86::VMOVLPSrm, X86::VMOVHPSrm,
   X86::MOVDI2PDIrm, X86::MOVDI2SSrm, X86::MOVPDI2DImr, X86::MOVSS2DImr,
-  X86::VMOVDI2PDIrm, X86::VMOVDI2SSrm, X86::VMOVPDI2DImr, X86::VMOVSS2DImr,
+  //X86::VMOVDI2PDIrm, X86::VMOVDI2SSrm, X86::VMOVPDI2DImr, X86::VMOVSS2DImr,
   // Loads 64-bit values into SIMD registers.
   X86::MOVSDmr, X86::MOVLPDmr, X86::MOVHPDmr,
-  X86::VMOVSDmr, X86::VMOVLPDmr, X86::VMOVHPDmr,
+  //X86::VMOVSDmr, X86::VMOVLPDmr, X86::VMOVHPDmr,
   X86::MOVSDrm, X86::MOVLPDrm, X86::MOVHPDrm,
-  X86::VMOVSDrm, X86::VMOVLPDrm, X86::VMOVHPDrm,
+  //X86::VMOVSDrm, X86::VMOVLPDrm, X86::VMOVHPDrm,
   X86::MOV64toPQIrm, X86::MOVPQIto64mr, X86::MOV64toSDrm, X86::MOVSDto64mr, X86::MOVQI2PQIrm, X86::MOVPQI2QImr,
-  X86::VMOV64toPQIrm, X86::VMOVPQIto64mr, X86::VMOV64toSDrm, X86::VMOVSDto64mr, X86::VMOVQI2PQIrm, X86::VMOVPQI2QImr,
+  //X86::VMOV64toPQIrm, X86::VMOVPQIto64mr, X86::VMOV64toSDrm, X86::VMOVSDto64mr, X86::VMOVQI2PQIrm, X86::VMOVPQI2QImr,
   // These instructions all perform the same thing with roughly the same
   // execution performance on Skylake - perform a 128-bit load or store.
   X86::MOVUPSmr, X86::MOVUPDmr, X86::MOVDQUmr,
   X86::MOVAPSmr, X86::MOVAPDmr, X86::MOVDQAmr,
-  X86::VMOVUPSmr, X86::VMOVUPDmr, X86::VMOVDQUmr,
-  X86::VMOVAPSmr, X86::VMOVAPDmr, X86::VMOVDQAmr,
+  //X86::VMOVUPSmr, X86::VMOVUPDmr, X86::VMOVDQUmr,
+  //X86::VMOVAPSmr, X86::VMOVAPDmr, X86::VMOVDQAmr,
+  X86::MOVUPSrm, X86::MOVUPDrm, X86::MOVDQUrm,
+  X86::MOVAPSrm, X86::MOVAPDrm, X86::MOVDQArm,
+  //X86::VMOVUPSrm, X86::VMOVUPDrm, X86::VMOVDQUrm,
+  //X86::VMOVAPSrm, X86::VMOVAPDrm, X86::VMOVDQArm,
+  // These load 256-bits into YMM registers.
+  //X86::VMOVUPSYmr, X86::VMOVUPDYmr, X86::VMOVDQUYmr,
+  //X86::VMOVAPSYmr, X86::VMOVAPDYmr, X86::VMOVDQAYmr,
+  //X86::VMOVUPSYrm, X86::VMOVUPDYrm, X86::VMOVDQUYrm,
+  //X86::VMOVAPSYrm, X86::VMOVAPDYrm, X86::VMOVDQAYrm,
+
+  // Partial updates:
+  X86::PEXTRBmr, X86::PEXTRWmr, X86::PEXTRDmr, X86::PEXTRQmr,
+  //X86::VPEXTRBmr, X86::VPEXTRWmr, X86::VPEXTRDmr, X86::VPEXTRQmr,
+  X86::PINSRBrm, X86::PINSRWrm, X86::PINSRDrm, X86::PINSRQrm,
+  //X86::VPINSRBrm, X86::VPINSRWrm, X86::VPINSRDrm, X86::VPINSRQrm,
+  X86::INSERTPSrm, X86::VINSERTPSrm,
+
+  // Sign-extended and zero-extended packed moves:
+  X86::PMOVSXBWrm, X86::PMOVSXBDrm, X86::PMOVSXBQrm, X86::PMOVSXWDrm, X86::PMOVSXWQrm, X86::PMOVSXDQrm,
+  X86::PMOVZXBWrm, X86::PMOVZXBDrm, X86::PMOVZXBQrm, X86::PMOVZXWDrm, X86::PMOVZXWQrm, X86::PMOVZXDQrm
+  );
+
+constexpr auto XMM_DEST_INSTRS = array_of(
+  X86::MOVSSrm, X86::MOVLPSrm, X86::MOVHPSrm,
+  X86::VMOVSSrm, X86::VMOVLPSrm, X86::VMOVHPSrm,
+  X86::MOVDI2PDIrm, X86::MOVDI2SSrm,
+  X86::VMOVDI2PDIrm, X86::VMOVDI2SSrm,
+  X86::MOVSDrm, X86::MOVLPDrm, X86::MOVHPDrm,
+  X86::VMOVSDrm, X86::VMOVLPDrm, X86::VMOVHPDrm,
+  X86::MOV64toPQIrm, X86::MOV64toSDrm, X86::MOVQI2PQIrm,
+  X86::VMOV64toPQIrm, X86::VMOV64toSDrm, X86::VMOVQI2PQIrm,
   X86::MOVUPSrm, X86::MOVUPDrm, X86::MOVDQUrm,
   X86::MOVAPSrm, X86::MOVAPDrm, X86::MOVDQArm,
   X86::VMOVUPSrm, X86::VMOVUPDrm, X86::VMOVDQUrm,
   X86::VMOVAPSrm, X86::VMOVAPDrm, X86::VMOVDQArm,
-  // These load 256-bits into YMM registers.
-  X86::VMOVUPSYmr, X86::VMOVUPDYmr, X86::VMOVDQUYmr,
-  X86::VMOVAPSYmr, X86::VMOVAPDYmr, X86::VMOVDQAYmr,
-  X86::VMOVUPSYrm, X86::VMOVUPDYrm, X86::VMOVDQUYrm,
-  X86::VMOVAPSYrm, X86::VMOVAPDYrm, X86::VMOVDQAYrm,
-
-  // Partial updates:
-  X86::PEXTRBmr, X86::PEXTRWmr, X86::PEXTRDmr, X86::PEXTRQmr,
-  X86::VPEXTRBmr, X86::VPEXTRWmr, X86::VPEXTRDmr, X86::VPEXTRQmr,
+  //X86::VMOVUPSYrm, X86::VMOVUPDYrm, X86::VMOVDQUYrm,
+  //X86::VMOVAPSYrm, X86::VMOVAPDYrm, X86::VMOVDQAYrm,
   X86::PINSRBrm, X86::PINSRWrm, X86::PINSRDrm, X86::PINSRQrm,
   X86::VPINSRBrm, X86::VPINSRWrm, X86::VPINSRDrm, X86::VPINSRQrm,
-  X86::INSERTPSrm, X86::VINSERTPSrm
+  X86::INSERTPSrm, X86::VINSERTPSrm,
+  X86::PMOVSXBWrm, X86::PMOVSXBDrm, X86::PMOVSXBQrm, X86::PMOVSXWDrm, X86::PMOVSXWQrm, X86::PMOVSXDQrm,
+  X86::PMOVZXBWrm, X86::PMOVZXBDrm, X86::PMOVZXBQrm, X86::PMOVZXWDrm, X86::PMOVZXWQrm, X86::PMOVZXDQrm
   );
 
 constexpr auto SAFE_INSTRS = array_of(
@@ -130,6 +156,7 @@ public:
   bool isModeledFunction(StringRef name);
   bool isMemInstr(unsigned int opcode);
   bool isSafeInstr(unsigned int opcode);
+  bool isXmmDestInstr(unsigned int opcode);
   size_t getMemFootprint(unsigned int opcode);
 
   // These functions only make sense in GPR instrumentation mode.
@@ -152,19 +179,19 @@ private:
   // Use C++11 trickery to extract the size of the array above at compile time.
   using meminstrs_t = std::array<unsigned int, MEM_INSTRS.size()>;
   using safeinstrs_t = std::array<unsigned int, SAFE_INSTRS.size()>;
+  using xmmdestinstrs_t = std::array<unsigned int, XMM_DEST_INSTRS.size()>;
 
   uint8_t AccumulatorBytes[NUM_ACCUMULATORS];
   unsigned int DataUsageMask;
 
   static void initModeledFunctions();
-  static void initMemInstrs();
-  static void initSafeInstrs();
+  static void initInstrs();
   static bool uncachedModeledFunctions;
-  static bool uncachedMemInstrs;
-  static bool uncachedSafeInstrs;
+  static bool uncachedInstrs;
   static std::vector<std::string> ModeledFunctions;
   static meminstrs_t MemInstrs;
   static safeinstrs_t SafeInstrs;
+  static xmmdestinstrs_t XmmDestInstrs;
 };
 
 }

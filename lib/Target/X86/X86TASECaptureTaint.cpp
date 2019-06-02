@@ -230,6 +230,10 @@ void X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
     case X86::PINSRWrm: case X86::PINSRDrm: case X86::PINSRQrm:
     case X86::VPINSRWrm: case X86::VPINSRDrm: case X86::VPINSRQrm:
     case X86::INSERTPSrm: case X86::VINSERTPSrm:
+    case X86::PMOVSXBWrm: case X86::PMOVSXBDrm: case X86::PMOVSXBQrm:
+    case X86::PMOVSXWDrm: case X86::PMOVSXWQrm: case X86::PMOVSXDQrm:
+    case X86::PMOVZXBWrm: case X86::PMOVZXBDrm: case X86::PMOVZXBQrm:
+    case X86::PMOVZXWDrm: case X86::PMOVZXWQrm: case X86::PMOVZXDQrm:
       PoisonCheckReg(size);
       break;
     //case X86::VMOVUPSYmr: case X86::VMOVUPDYmr: case X86::VMOVDQUYmr:
@@ -405,6 +409,8 @@ void X86TASECaptureTaintPass::PoisonCheckReg(size_t size, unsigned int align) {
   // TODO: Handle all stack accesses which we know are aligned.
   if (align >= 2) {
    InsertBefore = false;
+   // Partial register transfers from XMM are slow - just check the entire thing at once.
+   if (Analysis.isXmmDestInstr(CurrentMI->getOpcode())) size = 16;
    unsigned int acc_idx = AllocateOffset(size);
    PoisonCheckRegInternal(size, CurrentMI->getOperand(0).getReg(), acc_idx);
   } else {
