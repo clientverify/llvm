@@ -196,6 +196,26 @@ size_t TASEAnalysis::getMemFootprint(unsigned int opcode) {
   llvm_unreachable("TASE: How is this even possible?");
 }
 
+bool TASEAnalysis::isSpecialInlineAsm(const MachineInstr &MI) const {
+  if (!MI.isInlineAsm()) return false;
+
+  unsigned NumDefs = 0;
+  for (; MI.getOperand(NumDefs).isReg() && MI.getOperand(NumDefs).isDef(); ++NumDefs) {}
+  std::string AsmStr = std::string(MI.getOperand(NumDefs).getSymbolName());
+  if (AsmStr.empty()) {
+    errs() << "TASE: Ignoring empty inline asm/barrier" << MI;
+    return true;
+  } else if (AsmStr.find("mov %fs:0,") == 0) {
+    errs() << "TASE: Special exception for __pthread_self: " << MI;
+    return true;
+  } else if (AsmStr.find("syscall") == 0) {
+    errs() << "TASE: Allowing all syscalls: " << MI;
+    return true;
+  } else {
+    return false;
+  }
+}
+
 
 /* -- GPR ------------------------------------------------------------------- */
 int TASEAnalysis::AllocateAccOffset(size_t bytes) {

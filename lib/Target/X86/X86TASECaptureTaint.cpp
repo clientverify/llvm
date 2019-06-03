@@ -118,6 +118,9 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
     // one inserts into the list.
     for (MachineInstr &MI : MBB.instrs()) {
       LLVM_DEBUG(dbgs() << "TASE: Analyzing taint for " << MI);
+      if (Analysis.isSpecialInlineAsm(MI)) {
+        continue;
+      }
       if (MI.mayLoad() && MI.mayStore()) {
         errs() << "TASE: Somehow we have a CISC instruction! " << MI;
         llvm_unreachable("TASE: Please handle this instruction.");

@@ -157,6 +157,7 @@ public:
   bool isMemInstr(unsigned int opcode);
   bool isSafeInstr(unsigned int opcode);
   bool isXmmDestInstr(unsigned int opcode);
+  bool isSpecialInlineAsm(const MachineInstr &MI) const;
   size_t getMemFootprint(unsigned int opcode);
 
   // These functions only make sense in GPR instrumentation mode.
