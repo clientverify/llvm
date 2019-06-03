@@ -203,13 +203,16 @@ bool TASEAnalysis::isSpecialInlineAsm(const MachineInstr &MI) const {
   for (; MI.getOperand(NumDefs).isReg() && MI.getOperand(NumDefs).isDef(); ++NumDefs) {}
   std::string AsmStr = std::string(MI.getOperand(NumDefs).getSymbolName());
   if (AsmStr.empty()) {
-    errs() << "TASE: Ignoring empty inline asm/barrier" << MI;
+    errs() << "TASE: ASSEMBLY - Ignoring empty inline asm/barrier " << AsmStr << "\n";
     return true;
-  } else if (AsmStr.find("mov %fs:0,") == 0) {
-    errs() << "TASE: Special exception for __pthread_self: " << MI;
+  } else if (AsmStr.find("mov %fs:0,$0") == 0) {
+    errs() << "TASE: ASSEMBLY - Special exception for __pthread_self: " << AsmStr << "\n";
     return true;
   } else if (AsmStr.find("syscall") == 0) {
-    errs() << "TASE: Allowing all syscalls: " << MI;
+    errs() << "TASE: ASSEMBLY - Allowing syscalls: " << AsmStr << "\n";
+    return true;
+  } else if (AsmStr.find("mov $1,%rsp ; jmp *$0") == 0) {
+    errs() << "TASE: ASSEMBLY - Special exception for CRTJMP: " << AsmStr << "\n";
     return true;
   } else {
     return false;
