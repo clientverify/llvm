@@ -737,6 +737,21 @@ void X86AsmPrinter::EmitTASECartridgeRecords() {
   OutStreamer->AddComment("End of TASE Cartridge records");
   OutStreamer->AddBlankLine();
 
+  OutStreamer->SwitchSection(
+      OutContext.getELFSection(".rodata.tase_modeled_records", ELF::SHT_PROGBITS, 0));
+
+  OutStreamer->AddComment("Start of TASE Modeled records");
+  OutStreamer->AddBlankLine();
+
+  for (MCCartridgeRecord *record : *records) {
+    if (record->Modeled) {
+      OutStreamer->EmitSymbolValue(record->ModeledRecord(), 8);
+    }
+  }
+
+  OutStreamer->AddComment("End of TASE Modeled records");
+  OutStreamer->AddBlankLine();
+
   OutStreamer->SwitchSection(Cur);
 }
 
