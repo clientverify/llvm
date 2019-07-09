@@ -424,9 +424,7 @@ let isCodeGenOnly = 1, hasSideEffects = 1 in {
   let mayLoad = 1 in
   def TASE_JMP64m : I<0xFF, MRM4m, (outs), (ins i64mem:$dst), "jmp{q}\t{*}$dst",
                       []>;
-
-  let Uses = [EFLAGS] in
-  def TASE_JNE : Ii32PCRel<0x85, RawFrm, (outs), (ins brtarget32:$dst), "jne\t$dst",
-                     [(X86brcond bb:$dst, X86_COND_NE, EFLAGS)]>, OpSize32, TB;
+  def TASE_JMP : Ii32PCRel<0xE9, RawFrm, (outs), (ins brtarget32:$dst),
+                          "jmp\t$dst", []>, OpSize32;
 
 }
