@@ -716,7 +716,7 @@ void X86AsmPrinter::EmitTASECartridgeRecords() {
   }
   MCSection *Cur = OutStreamer->getCurrentSectionOnly();
   OutStreamer->SwitchSection(
-      OutContext.getELFSection(".rodata.tase_records", ELF::SHT_PROGBITS, 0));
+      OutContext.getELFSection(".data.tase_records", ELF::SHT_PROGBITS, 0));
 
   OutStreamer->AddComment("Start of TASE Cartridge records");
   OutStreamer->AddBlankLine();
@@ -738,7 +738,7 @@ void X86AsmPrinter::EmitTASECartridgeRecords() {
   OutStreamer->AddBlankLine();
 
   OutStreamer->SwitchSection(
-      OutContext.getELFSection(".rodata.tase_modeled_records", ELF::SHT_PROGBITS, 0));
+      OutContext.getELFSection(".data.tase_modeled_records", ELF::SHT_PROGBITS, 0));
 
   OutStreamer->AddComment("Start of TASE Modeled records");
   OutStreamer->AddBlankLine();
