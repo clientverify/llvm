@@ -73,7 +73,6 @@ private:
   TASEAnalysis Analysis;
 
   bool SplitAtCalls(MachineBasicBlock &MBB);
-  bool SplitAtSpills(MachineBasicBlock &MBB);
   bool SplitBeforeIndirectFlow(MachineBasicBlock &MBB);
   MachineBasicBlock *SplitBefore(MachineBasicBlock *MBB, MachineBasicBlock::iterator MII);
   bool isLive(MachineBasicBlock *MBB, unsigned Reg);
@@ -103,14 +102,6 @@ bool X86TASEDecorateCartridgePass::runOnMachineFunction(MachineFunction &MF) {
     // Do reverse analysis to break blocks at call boundaries.
     for (MachineBasicBlock &MBB : MF) {
       modified |= SplitAtCalls(MBB);
-    }
-
-    if (Analysis.getInstrumentationMode() == TIM_GPR) {
-      // Do forward analysis to break blocks when taint accumulator registers
-      // need spilling.
-      for (MachineBasicBlock &MBB : MF) {
-        modified |= SplitAtSpills(MBB);
-      }
     }
 
     if (TASEParanoidControlFlow) {
@@ -214,40 +205,6 @@ bool X86TASEDecorateCartridgePass::SplitAtCalls(MachineBasicBlock &MBB) {
   return hasSplit;
 }
 
-bool X86TASEDecorateCartridgePass::SplitAtSpills(MachineBasicBlock &MBB) {
-  bool hasSplit = false;
-  MachineBasicBlock *CurrMBB = &MBB;
-
-  Analysis.ResetAccOffsets();
-  auto MII = CurrMBB->instr_begin();
-
-  while(MII != CurrMBB->instr_end()) {
-    unsigned int opcode = MII->getOpcode();
-    if (Analysis.isMemInstr(opcode)) {
-      size_t size = Analysis.getMemFootprint(opcode);
-      assert(size > 0);
-      size = (size == 1) ? 2 : size;
-      int idx = Analysis.AllocateAccOffset(size);
-      if (idx < 0) {
-        // This instruction made the taint tracker run out of accumulator
-        // registers. Copy it and everything after it into a new block.
-        // TODO: Does this orphan debug instructions?  Explore if we have
-        // bundles or implicitly attached debug instructions that need to be
-        // copied over.
-        CurrMBB = SplitBefore(CurrMBB, MachineBasicBlock::iterator(*MII));
-        Analysis.ResetAccOffsets();
-        MII = CurrMBB->instr_begin();
-        hasSplit = true;
-        // Rereun the accumulator analysis on the instruction in the new block.
-        continue;
-      }
-    }
-    ++MII;
-  }
-
-  return hasSplit;
-}
-
 MachineBasicBlock *X86TASEDecorateCartridgePass::SplitBefore(
     MachineBasicBlock *MBB, MachineBasicBlock::iterator MII) {
   // Make a new MBB that's parented to the same LLVM IR BB that our
@@ -302,7 +259,7 @@ bool X86TASEDecorateCartridgePass::isLive(MachineBasicBlock *MBB, unsigned Reg) 
       return false;
     }
   }
-  // If we reached the end, it is safe to clobber Reg at the end of a block of
+  // If we reached the end, it is safe to clobber Reg at the end of a block if
   // no successor has it live in.
   assert(I == MBB->end());
   for (MachineBasicBlock *S : MBB->successors()) {

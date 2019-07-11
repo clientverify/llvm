@@ -8,7 +8,7 @@
 #include "X86InstrInfo.h"
 
 enum TASEInstMode {
-  TIM_NONE, TIM_GPR, TIM_SIMD
+  TIM_NONE, TIM_SIMD
 };
 
 namespace llvm {
@@ -24,11 +24,8 @@ constexpr auto array_of(Ts&&... vals) -> std::array<unsigned int, sizeof...(Ts)>
   return {{ vals... }};
 }
 
-static constexpr size_t NUM_ACCUMULATORS = 2;
 static constexpr unsigned int TASE_REG_TMP = X86::R14;
 static constexpr unsigned int TASE_REG_RET = X86::R15;
-static constexpr unsigned int TASE_REG_ACC[] = {X86::R12, X86::R13};
-
 static constexpr unsigned int TASE_REG_REFERENCE = X86::XMM13;
 static constexpr unsigned int TASE_REG_ACCUMULATOR = X86::XMM14;
 static constexpr unsigned int TASE_REG_DATA = X86::XMM15;
@@ -160,14 +157,6 @@ public:
   bool isSpecialInlineAsm(const MachineInstr &MI) const;
   size_t getMemFootprint(unsigned int opcode);
 
-  // These functions only make sense in GPR instrumentation mode.
-  // Returns an index between 0 and NUM_ACCUMULATORS or -1 if we're out of
-  // room in all accumulators.
-  int AllocateAccOffset(size_t bytes);
-  void ResetAccOffsets();
-  uint8_t getAccUsage(unsigned int offset) const;
-
-  // These functions only make sense in SIMD instrumentation mode.
   // Returns a byte offset between 0 and XMMREG_SIZE for the LSB index of a
   // slice of the requested size aligned to the requested size or -1 if we're
   // out of room.
@@ -182,7 +171,6 @@ private:
   using safeinstrs_t = std::array<unsigned int, SAFE_INSTRS.size()>;
   using xmmdestinstrs_t = std::array<unsigned int, XMM_DEST_INSTRS.size()>;
 
-  uint8_t AccumulatorBytes[NUM_ACCUMULATORS];
   unsigned int DataUsageMask;
 
   static void initModeledFunctions();

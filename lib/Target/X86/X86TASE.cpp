@@ -22,10 +22,9 @@ static cl::opt<std::string, true> TASEModeledFunctionsFlag(
 TASEInstMode TASEInstrumentationMode;
 static cl::opt<TASEInstMode, true> TASEInstrumentationModeFlag(
     "x86-tase-instrumentation-mode",
-    cl::desc("Choose the tain tracking instrumentation kind."),
+    cl::desc("Choose the taint tracking instrumentation mode."),
     cl::values(
       clEnumValN(TIM_NONE, "none", "No TASE taint tracking"),
-      clEnumValN(TIM_GPR, "gpr", "GPR based TASE taint tracking"),
       clEnumValN(TIM_SIMD, "simd", "SIMD based TASE taint tracking")),
     cl::location(TASEInstrumentationMode),
     cl::init(TIM_SIMD));
@@ -87,7 +86,6 @@ TASEInstMode TASEAnalysis::getInstrumentationMode() {
 
 
 TASEAnalysis::TASEAnalysis() {
-  ResetAccOffsets();
   ResetDataOffsets();
 }
 
@@ -219,33 +217,6 @@ bool TASEAnalysis::isSpecialInlineAsm(const MachineInstr &MI) const {
   }
 }
 
-
-/* -- GPR ------------------------------------------------------------------- */
-int TASEAnalysis::AllocateAccOffset(size_t bytes) {
-  assert(bytes && " TASE: Cannot instrument instruction with unknown operand bytes.");
-  assert(bytes <= GREG_SIZE && "TASE: Cannot currently handle SIMD values or larger.");
-  assert(bytes > 1 && "TASE: Cannot do single byte taint checks.");
-
-  for (int i = 0; i < static_cast<int>(NUM_ACCUMULATORS); i++) {
-    if (AccumulatorBytes[i] + bytes <= GREG_SIZE) {
-      AccumulatorBytes[i] += bytes;
-      return i;
-    }
-  }
-  /* Only got here if we weren't able to find a slot.  TO THE SPRINGBOARD!!!*/
-  return -1;
-}
-
-void TASEAnalysis::ResetAccOffsets() {
-  std::fill(AccumulatorBytes, AccumulatorBytes + NUM_ACCUMULATORS, 0);
-}
-
-uint8_t TASEAnalysis::getAccUsage(unsigned int idx) const {
-  assert(idx < NUM_ACCUMULATORS);
-  return AccumulatorBytes[idx];
-}
-
-/* -- SIMD ------------------------------------------------------------------ */
 int TASEAnalysis::AllocateDataOffset(size_t bytes) {
   assert(bytes && " TASE: Cannot instrument instruction with unknown operand bytes.");
   assert(bytes > 1 && "TASE: Cannot do single byte taint checks.");

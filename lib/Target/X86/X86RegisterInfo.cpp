@@ -578,21 +578,12 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
     }
   }
 
-  TASEAnalysis analysis;
-  // TASE: Reserve accumulator and temp registers.
+  // TASE: Reserve return address and temp registers.
   for (MCSubRegIterator AI(TASE_REG_TMP, this, true); AI.isValid(); ++AI) {
     Reserved.set(*AI);
   }
   for (MCSubRegIterator AI(TASE_REG_RET, this, true); AI.isValid(); ++AI) {
     Reserved.set(*AI);
-  }
-
-  if (analysis.getInstrumentationMode() == TIM_GPR) {
-    for (unsigned n = 0; n < NUM_ACCUMULATORS; ++n) {
-      for (MCSubRegIterator AI(TASE_REG_ACC[n], this, true); AI.isValid(); ++AI) {
-        Reserved.set(*AI);
-      }
-    }
   }
 
   // Always reserve the XMM registers because they may be neaded for floating point
