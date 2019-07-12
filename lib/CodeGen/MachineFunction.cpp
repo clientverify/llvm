@@ -209,6 +209,7 @@ MachineFunction::~MachineFunction() {
 }
 
 void MachineFunction::clear() {
+  CartridgeInfos.clear();
   Properties.reset();
   // Don't call destructors on MachineInstr and MachineOperand. All of their
   // memory comes from the BumpPtrAllocator which is about to be purged.
@@ -279,6 +280,7 @@ bool MachineFunction::shouldSplitStack() const {
 /// ordering of the blocks within the function.  If a specific MachineBasicBlock
 /// is specified, only that block and those after it are renumbered.
 void MachineFunction::RenumberBlocks(MachineBasicBlock *MBB) {
+  assert(CartridgeInfos.empty() || "TASE: Can't renumber and rearrange blocks after TASE records are generated.");
   if (empty()) { MBBNumbering.clear(); return; }
   MachineFunction::iterator MBBI, E = end();
   if (MBB == nullptr)
@@ -803,6 +805,12 @@ try_next:;
 }
 
 /// \}
+
+TASECartridgeInfo *MachineFunction::createCartridgeInfo(MachineBasicBlock *MBB) {
+  MCCartridgeRecord *record = Ctx.createCartridgeRecord(MBB->getSymbol(), getName());
+  CartridgeInfos.emplace_back(MBB, record);
+  return &CartridgeInfos.back();
+}
 
 //===----------------------------------------------------------------------===//
 //  MachineJumpTableInfo implementation

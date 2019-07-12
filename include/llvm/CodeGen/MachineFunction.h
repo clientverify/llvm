@@ -36,6 +36,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/ArrayRecycler.h"
 #include "llvm/Support/AtomicOrdering.h"
@@ -65,6 +66,7 @@ class MachineFunction;
 class MachineJumpTableInfo;
 class MachineModuleInfo;
 class MachineRegisterInfo;
+class MCCartridgeRecord;
 class MCContext;
 class MCInstrDesc;
 class Pass;
@@ -223,6 +225,18 @@ struct LandingPadInfo {
       : LandingPadBlock(MBB) {}
 };
 
+/// This structure is used to "congeal" sequences of adjacent basic blocks into
+/// a single cartridge.  The cartridge must still obey its invariants - it can
+/// only be entered through the header but this lets us jump out of them from
+/// within multiple locations in its body.
+struct TASECartridgeInfo {
+  SmallVector<MachineBasicBlock *, 2> Blocks; // All blocks in this cartridge.
+  MCCartridgeRecord *Record;
+
+  explicit TASECartridgeInfo(MachineBasicBlock *MBB, MCCartridgeRecord *R)
+      : Blocks(1, MBB), Record(R) {}
+};
+
 class MachineFunction {
   const Function &F;
   const LLVMTargetMachine &Target;
@@ -342,6 +356,7 @@ class MachineFunction {
 
   EHPersonality PersonalityTypeCache = EHPersonality::Unknown;
 
+  std::vector<TASECartridgeInfo> CartridgeInfos;
   /// \}
 
   /// Clear all the members of this MachineFunction, but the ones used
@@ -939,6 +954,12 @@ public:
   VariableDbgInfoMapTy &getVariableDbgInfo() { return VariableDbgInfos; }
   const VariableDbgInfoMapTy &getVariableDbgInfo() const {
     return VariableDbgInfos;
+  }
+
+  TASECartridgeInfo *createCartridgeInfo(MachineBasicBlock *MBB);
+
+  const std::vector<TASECartridgeInfo> &getCartridgeInfos() {
+    return CartridgeInfos;
   }
 };
 

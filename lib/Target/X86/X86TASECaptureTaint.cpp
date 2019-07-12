@@ -108,38 +108,40 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
 //   TRI = Subtarget->getRegisterInfo();
 
   bool modified = false;
-  for (MachineBasicBlock &MBB : MF) {
-    LLVM_DEBUG(dbgs() << "TASE: Analyzing taint for block " << MBB);
+  for (const TASECartridgeInfo &cInfo : MF.getCartridgeInfos()) {
     // Every cartridge entry sequence is going to flush the accumulators.
     Analysis.ResetDataOffsets();
-    // In using this range, we use the super special property that a machine
-    // instruction list obeys the iterator characteristics of list<
-    // undocumented property that instr_iterator is not invalidated when
-    // one inserts into the list.
-    for (MachineInstr &MI : MBB.instrs()) {
-      LLVM_DEBUG(dbgs() << "TASE: Analyzing taint for " << MI);
-      if (Analysis.isSpecialInlineAsm(MI)) {
-        continue;
+    for (MachineBasicBlock *MBB : cInfo.Blocks) {
+      LLVM_DEBUG(dbgs() << "TASE: Analyzing taint for block " << *MBB);
+      // In using this range, we use the super special property that a machine
+      // instruction list obeys the iterator characteristics of list<
+      // undocumented property that instr_iterator is not invalidated when
+      // one inserts into the list.
+      for (MachineInstr &MI : MBB->instrs()) {
+        LLVM_DEBUG(dbgs() << "TASE: Analyzing taint for " << MI);
+        if (Analysis.isSpecialInlineAsm(MI)) {
+          continue;
+        }
+        if (MI.mayLoad() && MI.mayStore()) {
+          errs() << "TASE: Somehow we have a CISC instruction! " << MI;
+          llvm_unreachable("TASE: Please handle this instruction.");
+        }
+        // Only our RISC-like loads should have this set.
+        if (!MI.mayLoad() && !MI.mayStore() && !MI.isCall() && !MI.isReturn() && !MI.hasUnmodeledSideEffects()) {
+          // Non-memory instructions need no instrumentation.
+          continue;
+        }
+        if (Analysis.isSafeInstr(MI.getOpcode())) {
+          continue;
+        }
+        if (MI.hasUnmodeledSideEffects() && !Analysis.isMemInstr(MI.getOpcode())) {
+          errs() << "TASE: An instruction with potentially unwanted side-effects is emitted. " << MI;
+          continue;
+        }
+        assert(Analysis.isMemInstr(MI.getOpcode()) && "TASE: Encountered an instruction we haven't handled.");
+        InstrumentInstruction(MI);
+        modified = true;
       }
-      if (MI.mayLoad() && MI.mayStore()) {
-        errs() << "TASE: Somehow we have a CISC instruction! " << MI;
-        llvm_unreachable("TASE: Please handle this instruction.");
-      }
-      // Only our RISC-like loads should have this set.
-      if (!MI.mayLoad() && !MI.mayStore() && !MI.isCall() && !MI.isReturn() && !MI.hasUnmodeledSideEffects()) {
-        // Non-memory instructions need no instrumentation.
-        continue;
-      }
-      if (Analysis.isSafeInstr(MI.getOpcode())) {
-        continue;
-      }
-      if (MI.hasUnmodeledSideEffects() && !Analysis.isMemInstr(MI.getOpcode())) {
-        errs() << "TASE: An instruction with potentially unwanted side-effects is emitted. " << MI;
-        continue;
-      }
-      assert(Analysis.isMemInstr(MI.getOpcode()) && "TASE: Encountered an instruction we haven't handled.");
-      InstrumentInstruction(MI);
-      modified = true;
     }
   }
   return modified;

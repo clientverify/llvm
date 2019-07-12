@@ -4,6 +4,10 @@
 //
 // We heavily lean on the code in Mips\MipsBranchExpansion.cpp to model
 // our splitting gymnastics.
+//
+// If it is possible, multiple adjacent basic blocks are congealed into
+// cartridges.  This reduces the number of IR cartridges to be looked up and
+// further reduces the number of cartridges that may have eflags live-in.
 
 #include "X86.h"
 #include "X86InstrBuilder.h"
@@ -19,6 +23,7 @@
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/MC/MCCartridgeRecord.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -74,6 +79,7 @@ private:
 
   bool SplitAtCalls(MachineBasicBlock &MBB);
   bool SplitBeforeIndirectFlow(MachineBasicBlock &MBB);
+  void MakeRecords(MachineFunction &MF);
   MachineBasicBlock *SplitBefore(MachineBasicBlock *MBB, MachineBasicBlock::iterator MII);
   bool isLive(MachineBasicBlock *MBB, unsigned Reg);
 };
@@ -87,33 +93,87 @@ bool X86TASEDecorateCartridgePass::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "********** " << getPassName() << " : " << MF.getName()
                     << " **********\n");
 
+  if (Analysis.getInstrumentationMode() == TIM_NONE) {
+    return false;
+  }
   if (Analysis.isModeledFunction(MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Function is modeled in the interpreter\n.");
-    return false;
+    MF.createCartridgeInfo(&MF.front())->Record->Modeled = true;
+    return true;
   }
 
   Subtarget = &MF.getSubtarget<X86Subtarget>();
   TII = Subtarget->getInstrInfo();
   TRI = Subtarget->getRegisterInfo();
 
-  bool modified = false;
+  // Do reverse analysis to break blocks at call boundaries.
+  for (MachineBasicBlock &MBB : MF) {
+    SplitAtCalls(MBB);
+  }
 
-  if (Analysis.getInstrumentationMode() != TIM_NONE) {
-    // Do reverse analysis to break blocks at call boundaries.
+  if (TASEParanoidControlFlow) {
     for (MachineBasicBlock &MBB : MF) {
-      modified |= SplitAtCalls(MBB);
+      SplitBeforeIndirectFlow(MBB);
     }
+  }
 
+  // Make the blocks monotonic again for debuggability.
+  MF.RenumberBlocks();
+
+  MakeRecords(MF);
+
+  LLVM_DEBUG(
+      for (auto TCI : MF.getCartridgeInfos()) {
+        dbgs() << "Cartridge in " << MF.getName() << " : ";
+        for (auto MBB : TCI.Blocks) {
+          dbgs() << MBB->getName() << ",";
+        }
+        dbgs() << "\n";
+      });
+  return true;
+}
+
+void X86TASEDecorateCartridgePass::MakeRecords(MachineFunction &MF) {
+  if (MF.empty()) return;
+
+  TASECartridgeInfo *currentInfo = MF.createCartridgeInfo(&MF.front());
+  auto MBBI = MF.begin();
+  auto MBBIend = MF.end();
+  MBBI++;
+
+  for (;MBBI != MBBIend; MBBI++) {
+    // We don't handle explicit jumps to locations within the same cartridge.
+    // But falling through is ok. Exploit this to congeal cartridge blocks.
+    // Only congeal if the previous block falls through to the current one
+    // and the current block can only be reached by the previous one. It is
+    // guaranteed that these blocks are going to be emitted sequentially by
+    // the compiler.
+    MachineBasicBlock *prevMBB = currentInfo->Blocks.back();
+    bool shouldCongeal = prevMBB->getFallThrough() == &*MBBI && MBBI->pred_size() == 1;
+    // Don't congeal if we split the block on purpose - for calls or indirect flow.
+    shouldCongeal = shouldCongeal && !prevMBB->back().isCall();
     if (TASEParanoidControlFlow) {
-      for (MachineBasicBlock &MBB : MF) {
-        modified |= SplitBeforeIndirectFlow(MBB);
+      // TODO refactor.
+      switch(MBBI->front().getOpcode()) {
+      case X86::CALL64r:
+      case X86::CALL64r_NT:
+      case X86::RETQ:
+      case X86::TAILJMPr64:
+      case X86::TAILJMPr64_REX:
+      case X86::JMP64r:
+      case X86::JMP64r_NT:
+        shouldCongeal = false;
       }
     }
 
-    // Make the blocks monotonic again.
-    MF.RenumberBlocks();
+    if (shouldCongeal) {
+      assert(MBBI->isPredecessor(prevMBB) &&
+          "TASE: How can a fall through block not have the source block as its predecessor?");
+      currentInfo->Blocks.push_back(&*MBBI);
+    } else {
+      currentInfo = MF.createCartridgeInfo(&*MBBI);
+    }
   }
-  return modified;
 }
 
 bool X86TASEDecorateCartridgePass::SplitBeforeIndirectFlow(MachineBasicBlock &MBB) {
@@ -198,7 +258,7 @@ bool X86TASEDecorateCartridgePass::SplitAtCalls(MachineBasicBlock &MBB) {
   // Unoptimized code sometimes has empty blocks.
   // Just throw a NOP in there.
   if (!hasInstr) {
-    LLVM_DEBUG(dbgs() << "TASE: Encountered an empty block.  Adding a NOOP to legalize it.");
+    LLVM_DEBUG(dbgs() << "TASE: Encountered an empty block.  Adding a NOOP to legalize it.\n");
     BuildMI(&MBB, DebugLoc(), TII->get(X86::NOOP));
     hasSplit = true;
   }

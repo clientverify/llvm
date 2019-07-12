@@ -40,8 +40,7 @@ namespace {
 
 class X86TASEAddCartridgeSpringboardPass : public MachineFunctionPass {
 public:
-  X86TASEAddCartridgeSpringboardPass() : MachineFunctionPass(ID),
-    FirstMI(nullptr) {
+  X86TASEAddCartridgeSpringboardPass() : MachineFunctionPass(ID) {
     initializeX86TASEAddCartridgeSpringboardPassPass(
         *PassRegistry::getPassRegistry());
   }
@@ -63,15 +62,12 @@ public:
   static char ID;
 
 private:
-  const X86Subtarget *Subtarget;
   const X86InstrInfo *TII;
-  MachineInstr *FirstMI;
-
   TASEAnalysis Analysis;
 
-  MCCartridgeRecord *EmitSpringboard(const char *label, bool indirect);
+  void EmitSpringboard(TASECartridgeInfo &cInfo);
   MachineInstrBuilder InsertInstr(
-      unsigned int opcode, unsigned int destReg = X86::NoRegister, MachineInstr *MI = nullptr);
+      MachineInstr *MI, unsigned int opcode, unsigned int destReg = X86::NoRegister);
 };
 
 } // end anonymous namespace
@@ -80,11 +76,7 @@ private:
 char X86TASEAddCartridgeSpringboardPass::ID = 0;
 
 MachineInstrBuilder X86TASEAddCartridgeSpringboardPass::InsertInstr(
-    unsigned int opcode, unsigned int destReg, MachineInstr *MI) {
-  if (MI == nullptr) {
-    MI = FirstMI;
-  }
-  assert(MI && "TASE: Unable to determine the instruction insertion location.");
+    MachineInstr *MI, unsigned int opcode, unsigned int destReg) {
   if (destReg == X86::NoRegister) {
     return BuildMI(*MI->getParent(), MI, MI->getDebugLoc(), TII->get(opcode));
   } else {
@@ -92,60 +84,44 @@ MachineInstrBuilder X86TASEAddCartridgeSpringboardPass::InsertInstr(
   }
 }
 
-MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard(const char *label, bool indirect) {
-  // We run after cartridge splitting - this guarantees that each machine block
-  // has at least one instruction.  It also guarantees that every basic block
-  // is a cartridge.  So just add the BB to our record along with a label
-  // attached to the first instruction in the block.
-  MachineBasicBlock *MBB = FirstMI->getParent();
-  MachineFunction *MF = MBB->getParent();
-  MCCartridgeRecord *cartridge = MF->getContext().createCartridgeRecord(MBB->getSymbol(), MF->getName());
+void X86TASEAddCartridgeSpringboardPass::EmitSpringboard(TASECartridgeInfo &cInfo) {
+  // Use our precalculated cartridge boundaries to label the first instruction in each of them.
+  // This will be run after all the decoration and cartridge discovery/coagulation code has already run.
+  MCCartridgeRecord *cartridge = cInfo.Record;
+  MachineBasicBlock *startMBB = cInfo.Blocks.front();
+  MachineFunction &MF = *startMBB->getParent();
+  MachineInstr *startMI = &startMBB->front();
 
+  // Cartridge prologue.
   // Load the body address into GPR_RET.
-  InsertInstr(X86::LEA64r, TASE_REG_RET)
+  InsertInstr(startMI, X86::LEA64r, TASE_REG_RET)
     .addReg(X86::RIP)           // base - attempt to use the locality of cartridgeBody.
     .addImm(1)                  // scale
     .addReg(X86::NoRegister)    // index
     .addSym(cartridge->Body())  // offset
     .addReg(X86::NoRegister);   // segment
-  if (indirect) {
-    // Indirectly jump to the springboard - this jumps to the 64-bit address stored at this label.
-    InsertInstr(X86::TASE_JMP64m)
-      .addReg(X86::NoRegister)    // base
-      .addImm(1)                  // scale
-      .addReg(X86::NoRegister)    // index
-      .addExternalSymbol(label)   // offset
-      .addReg(X86::NoRegister);   // segment
-  } else {
+  if (cInfo.Record->Modeled) {
     // Direct jump to the provided label in an rip relative manner.
-    InsertInstr(X86::TASE_JMP)
-      .addReg(X86::RIP)           // base
-      .addImm(1)                  // scale
-      .addReg(X86::NoRegister)    // index
-      .addExternalSymbol(label)   // offset
-      .addReg(X86::NoRegister);   // segment
+    InsertInstr(startMI, X86::TASE_JMP)
+      .addExternalSymbol("sb_modeled");
+  } else {
+    // Indirectly jump to the springboard - this jumps to the 64-bit address stored at this label.
+    InsertInstr(startMI, X86::TASE_JMP64m)
+      .addReg(X86::NoRegister)                 // base
+      .addImm(1)                               // scale
+      .addReg(X86::NoRegister)                 // index
+      .addExternalSymbol("tase_springboard")   // offset
+      .addReg(X86::NoRegister);                // segment
   }
 
-  //MachineInstr *cartridgeBodyPDMI = &firstMI;
-  // DEBUG: Assert that we are in an RTM transaction to check springboard behavior.
-  //MachineInstr *cartridgeBodyMI =
-  //  BuildMI(*MBB, cartridgeBodyPDMI, cartridgeBodyPDMI->getDebugLoc(), TII->get(X86::XTEST));
-  //BuildMI(*MBB, cartridgeBodyPDMI, cartridgeBodyPDMI->getDebugLoc(), TII->get(X86::JE_1))
-  //  .addSym(cartridge->BodyPostDebug());
-  //BuildMI(*MBB, cartridgeBodyPDMI, cartridgeBodyPDMI->getDebugLoc(), TII->get(X86::MOV64rm))
-  //  .addReg(X86::RAX)
-  //  .addReg(X86::NoRegister)  // base
-  //  .addImm(1)                // scale
-  //  .addReg(X86::NoRegister)  // index
-  //  .addImm(0)                // offset
-  //  .addReg(X86::NoRegister); // segment
+  startMI->setPreInstrSymbol(MF, cartridge->Body());
 
-  FirstMI->setPreInstrSymbol(*MF, cartridge->Body());
-  //cartridgeBodyPDMI->setPreInstrSymbol(*MF, cartridge->BodyPostDebug());
-
-  MBB->front().setPreInstrSymbol(*MF, cartridge->Cartridge());
-  MBB->back().setPostInstrSymbol(*MF, cartridge->End());
-  return cartridge;
+  // Tag the first instruction of our first block in our congealed cartridge.
+  // startMBB->front is now distinct from startMI because we have shoved
+  // instructions in front of it.
+  startMBB->front().setPreInstrSymbol(MF, cartridge->Cartridge());
+  // Tag past the last instruction of our last block in our congealed cartridge.
+  cInfo.Blocks.back()->back().setPostInstrSymbol(MF, cartridge->End());
 }
 
 
@@ -155,21 +131,21 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
   if (Analysis.getInstrumentationMode() == TIM_NONE) {
     return false;
   }
-
-  Subtarget = &MF.getSubtarget<X86Subtarget>();
-  TII = Subtarget->getInstrInfo();
+  TII = MF.getSubtarget<X86Subtarget>().getInstrInfo();
+  auto cInfos = MF.getCartridgeInfos();
 
   if (Analysis.isModeledFunction(MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Adding prolog to modeled function\n.");
-    FirstMI = &MF.front().front();
-    EmitSpringboard("sb_modeled", false)->Modeled = true;
-  } else {
-    for (MachineBasicBlock &MBB : MF) {
-      FirstMI = &MBB.front();
-      EmitSpringboard("tase_springboard", true);
-    }
+    assert(cInfos.size() == 1 && cInfos.front().Record->Modeled &&
+        "TASE: Modeled function not marked as such.");
+    assert(cInfos.front().Blocks.size() == 1 &&
+        cInfos.front().Blocks.front() == &MF.front() &&
+        "TASE: Nonsensical cartridge information for a modeled function.");
   }
-  FirstMI = nullptr;
+
+  for (TASECartridgeInfo &cInfo : cInfos) {
+    EmitSpringboard(cInfo);
+  }
 
   return true;
 }
