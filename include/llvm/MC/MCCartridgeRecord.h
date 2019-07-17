@@ -23,6 +23,7 @@ namespace llvm {
     MCSymbol *ModeledRecord();
 
     bool     Modeled;
+    bool     flags_live = true;
 
   private:
     MCSymbol *BB;

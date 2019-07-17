@@ -101,6 +101,13 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard(const cha
   MachineFunction *MF = MBB->getParent();
   MCCartridgeRecord *cartridge = MF->getContext().createCartridgeRecord(MBB->getSymbol(), MF->getName());
 
+
+  // Begin ABH edit --
+  //Let's assume we just add a bool field to MCCartridgeRecord called "flags_live".
+  bool eflags_dead = TII->isSafeToClobberEFLAGS(*MBB, MachineBasicBlock::iterator(FirstMI));  
+  cartridge->flags_live = !eflags_dead;
+  
+
   // Load the body address into GPR_RET.
   InsertInstr(X86::LEA64r, TASE_REG_RET)
     .addReg(X86::RIP)           // base - attempt to use the locality of cartridgeBody.
@@ -152,7 +159,7 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
   if (Analysis.isModeledFunction(MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Adding prolog to modeled function\n.");
     FirstMI = &MF.front().front();
-    EmitSpringboard("sb_modeled")->Modeled = true;
+    EmitSpringboard("tase_model")->Modeled = true;
   } else {
     for (MachineBasicBlock &MBB : MF) {
       FirstMI = &MBB.front();
