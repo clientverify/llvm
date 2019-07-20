@@ -62,12 +62,15 @@ public:
   static char ID;
 
 private:
+  const X86Subtarget *Subtarget;
   const X86InstrInfo *TII;
+  const X86RegisterInfo *TRI;
   TASEAnalysis Analysis;
 
   void EmitSpringboard(TASECartridgeInfo &cInfo);
   MachineInstrBuilder InsertInstr(
       MachineInstr *MI, unsigned int opcode, unsigned int destReg = X86::NoRegister);
+  unsigned GetScratchRegister(MachineBasicBlock *MBB);
 };
 
 } // end anonymous namespace
@@ -84,6 +87,26 @@ MachineInstrBuilder X86TASEAddCartridgeSpringboardPass::InsertInstr(
   }
 }
 
+unsigned X86TASEAddCartridgeSpringboardPass::GetScratchRegister(MachineBasicBlock *MBB) {
+  const TargetRegisterClass &GPRs = *TRI->getGPRsForTailCall(MBB->getParent());
+  for (auto Reg : GPRs) {
+    if (TRI->regsOverlap(Reg, X86::RSP) || TRI->regsOverlap(Reg, X86::RIP)) {
+      continue;
+    }
+    bool available = true;
+    for (auto &LI : MBB->liveins()) {
+      if (TRI->regsOverlap(LI.PhysReg, Reg)) {
+        available = false;
+        break;
+      }
+    }
+    if (available) {
+      return Reg;
+    }
+  }
+  assert(false && "We could not find a place to stash eflags");
+}
+
 void X86TASEAddCartridgeSpringboardPass::EmitSpringboard(TASECartridgeInfo &cInfo) {
   // Use our precalculated cartridge boundaries to label the first instruction in each of them.
   // This will be run after all the decoration and cartridge discovery/coagulation code has already run.
@@ -91,6 +114,31 @@ void X86TASEAddCartridgeSpringboardPass::EmitSpringboard(TASECartridgeInfo &cInf
   MachineBasicBlock *startMBB = cInfo.Blocks.front();
   MachineFunction &MF = *startMBB->getParent();
   MachineInstr *startMI = &startMBB->front();
+
+  bool LiveEflags = startMBB->isLiveIn(X86::EFLAGS);
+  unsigned ScratchReg = X86::NoRegister;
+  // If EFLAGS is live into this black, then stash its value before calling the springboard.
+  // Attempt 1: Just put it in AH using LAHF.  We can do this if EAX is not live-in.
+  // Attempt 2: Find a scratch register to move RAX into before clobbering EAX. This assumes
+  // that we have an unused caller-saved register.  We can't touch callee-saved registers
+  // even if they are not live into this block.
+  // Attempt 3 (unimplemented): Spill RAX into some static 64-bit location and then clobber
+  // RAX to save the flags.
+  if (LiveEflags) {
+    errs() << "TASE: Found a cartridge with live-in eflags. Stashing it before " << startMBB->getName() << ".\n";
+
+    for (const MachineBasicBlock::RegisterMaskPair &LI : startMBB->liveins()) {
+      if (TRI->regsOverlap(LI.PhysReg, X86::RAX)) {
+        ScratchReg = GetScratchRegister(startMBB);
+        break;
+      }
+    }
+
+    if (ScratchReg != X86::NoRegister) {
+      InsertInstr(startMI, X86::MOV64rr, ScratchReg).addReg(X86::RAX);
+    }
+    InsertInstr(startMI, X86::LAHF);
+  }
 
   // Cartridge prologue.
   // Load the body address into GPR_RET.
@@ -114,6 +162,13 @@ void X86TASEAddCartridgeSpringboardPass::EmitSpringboard(TASECartridgeInfo &cInf
       .addReg(X86::NoRegister);                // segment
   }
 
+  MachineInstr *origStartMI = startMI;
+  if (LiveEflags) {
+    startMI = InsertInstr(origStartMI, X86::SAHF);
+    if (ScratchReg != X86::NoRegister) {
+      InsertInstr(origStartMI, X86::MOV64rr, X86::RAX).addReg(ScratchReg);
+    }
+  }
   startMI->setPreInstrSymbol(MF, cartridge->Body());
 
   // Tag the first instruction of our first block in our congealed cartridge.
@@ -131,7 +186,9 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
   if (Analysis.getInstrumentationMode() == TIM_NONE) {
     return false;
   }
-  TII = MF.getSubtarget<X86Subtarget>().getInstrInfo();
+  Subtarget = &MF.getSubtarget<X86Subtarget>();
+  TII = Subtarget->.getInstrInfo();
+  TRI = Subtarget->getRegisterInfo();
   auto cInfos = MF.getCartridgeInfos();
 
   if (Analysis.isModeledFunction(MF.getName())) {
