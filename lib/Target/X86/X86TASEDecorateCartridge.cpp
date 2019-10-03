@@ -74,6 +74,7 @@ private:
 
   bool SplitAtCalls(MachineBasicBlock &MBB);
   bool SplitAtSpills(MachineBasicBlock &MBB);
+  bool SplitAfterNonTerminatorFlow(MachineBasicBlock &MBB);
   bool SplitBeforeIndirectFlow(MachineBasicBlock &MBB);
   MachineBasicBlock *SplitBefore(MachineBasicBlock *MBB, MachineBasicBlock::iterator MII);
   bool isLive(MachineBasicBlock *MBB, unsigned Reg);
@@ -113,6 +114,12 @@ bool X86TASEDecorateCartridgePass::runOnMachineFunction(MachineFunction &MF) {
       }
     }
 
+    //Difficult to split up paired jump statements at end of BB
+    
+    for (MachineBasicBlock &MBB : MF) {
+      modified |= SplitAfterNonTerminatorFlow(MBB);
+    }
+    
     if (TASEParanoidControlFlow) {
       for (MachineBasicBlock &MBB : MF) {
         modified |= SplitBeforeIndirectFlow(MBB);
@@ -123,6 +130,65 @@ bool X86TASEDecorateCartridgePass::runOnMachineFunction(MachineFunction &MF) {
     MF.RenumberBlocks();
   }
   return modified;
+}
+
+//Split up paired control flow instructions into seperate cartridges
+//ex.
+/*
+767f0c:       4c 8d 3d 07 00 00 00    lea    0x7(%rip),%r15        # 767f1a <rsa_pss_param_print+0x1aa>
+767f13:       ff 24 25 58 ef 6a 01    jmpq   *0x16aef58
+767f1a:       85 c0                   test   %eax,%eax
+767f1c:       0f 8f c7 00 00 00       jg     767fe9 <rsa_pss_param_print+0x279>
+767f22:       eb 3b                   jmp    767f5f <rsa_pss_param_print+0x1ef>
+*/								  
+
+bool X86TASEDecorateCartridgePass::SplitAfterNonTerminatorFlow(MachineBasicBlock &MBB) {
+  bool hasSplit = false;
+  int numTerms = 0;
+  MachineBasicBlock *pMBB = &MBB; 
+  for (auto MII = pMBB->instr_begin(); MII != pMBB->instr_end(); MII++) {
+    if (MII->isTerminator())
+      numTerms++;
+  }
+
+  if (numTerms >= 2) {
+    printf("\n\n\n\n\n IMPORTANT:  MULTIPLE TERMINATORS (%d) \n\n\n\n\n", numTerms);
+  }
+  
+  return hasSplit;
+  /*
+  MachineBasicBlock *pMBB = &MBB;
+
+  auto rMII = MBB.instr_rbegin();
+  rMII++;
+  if (rMII != MBB.instr_rend()) {
+    if (rMII->isBranch()) {
+      
+      SplitBefore(pMBB, MachineBasicBlock::iterator(rMII));
+      hasSplit= true;
+    }
+  }
+  return hasSplit;
+  */
+  /*
+  
+  for (auto MII = pMBB->instr_begin(); MII != pMBB->instr_end(); MII++) {
+    //Skip debug instrs and the first instr in the MBB
+    if (MII->isDebugInstr() && MII == pMBB->instr_begin()) {
+      continue;
+    }
+
+
+    if (MII->isBranch() && prevMI->isBranch() ) {
+      pMBB = SplitBefore(pMBB , MachineBasicBlock::iterator(MII));
+      MII = pMBB->instr_begin();
+      hasSplit = true;
+    }
+    prevMI++;
+  }
+  
+  return hasSplit;
+  */
 }
 
 bool X86TASEDecorateCartridgePass::SplitBeforeIndirectFlow(MachineBasicBlock &MBB) {

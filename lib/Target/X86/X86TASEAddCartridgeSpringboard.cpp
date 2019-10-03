@@ -141,7 +141,20 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard(const cha
   //cartridgeBodyPDMI->setPreInstrSymbol(*MF, cartridge->BodyPostDebug());
 
   MBB->front().setPreInstrSymbol(*MF, cartridge->Cartridge());
-  MBB->back().setPostInstrSymbol(*MF, cartridge->End());
+
+  //Try to grab the first terminator
+
+  bool foundTerm = false;
+  for (auto MII = MBB->instr_begin(); MII != MBB->instr_end(); MII++) {
+    if (MII->isTerminator()) {
+      MII->setPostInstrSymbol(*MF, cartridge->End());
+      foundTerm = true;
+      break;
+    }  
+  }
+  
+  if (!foundTerm) 
+    MBB->back().setPostInstrSymbol(*MF, cartridge->End());
   return cartridge;
 }
 
