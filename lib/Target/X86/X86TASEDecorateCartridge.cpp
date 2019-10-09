@@ -63,6 +63,8 @@ public:
         MachineFunctionProperties::Property::NoVRegs);
   }
 
+  
+  
   /// Pass identification, replacement for typeid.
   static char ID;
 
@@ -76,6 +78,8 @@ private:
   bool SplitAtSpills(MachineBasicBlock &MBB);
   bool SplitAfterNonTerminatorFlow(MachineBasicBlock &MBB);
   bool SplitBeforeIndirectFlow(MachineBasicBlock &MBB);
+  MachineInstrBuilder InsertInstr(unsigned int, unsigned int, MachineInstr*);
+  bool InsertCheckBeforeIndirectFlow(MachineBasicBlock &MBB); 
   MachineBasicBlock *SplitBefore(MachineBasicBlock *MBB, MachineBasicBlock::iterator MII);
   bool isLive(MachineBasicBlock *MBB, unsigned Reg);
 };
@@ -101,6 +105,15 @@ bool X86TASEDecorateCartridgePass::runOnMachineFunction(MachineFunction &MF) {
   bool modified = false;
 
   if (Analysis.getInstrumentationMode() != TIM_NONE) {
+
+    //Insert instruction before indirect control flow
+    //to test for taint
+    if (TASEParanoidControlFlow) {
+      for (MachineBasicBlock &MBB : MF) {
+	modified |= InsertCheckBeforeIndirectFlow(MBB);
+      }
+    }
+    
     // Do reverse analysis to break blocks at call boundaries.
     for (MachineBasicBlock &MBB : MF) {
       modified |= SplitAtCalls(MBB);
@@ -131,6 +144,67 @@ bool X86TASEDecorateCartridgePass::runOnMachineFunction(MachineFunction &MF) {
   }
   return modified;
 }
+
+//This function adds an extra safety check for our poisoning scheme before any of our
+//other passes run.  The idea is that it will help us ensure that any instructions that
+//encounter poison data will eventually directly jump to the springboard before encountering
+//indirect control flow that potentially computes an destination address using variables
+//marred by the poison taint tag.
+
+//Since we only emit a subset of x86, this extra check only needs to be inserted for
+//rets.  If we add extra call or jump variants in the future that support "doubly indirect"
+//addressing (ie jumps to the address pointed to by the instruction's register arg) we'll
+//need to add an extra check on those args here, and a jump to the springboard later.
+bool X86TASEDecorateCartridgePass::InsertCheckBeforeIndirectFlow(MachineBasicBlock &MBB) {
+
+  MachineBasicBlock *pMBB = &MBB;
+  bool modified = false;
+  
+  for (auto MII = pMBB->instr_begin(); MII != pMBB->instr_end(); MII++) {
+    if (MII->isDebugInstr()) {
+      continue;
+    }
+    switch (MII->getOpcode()) {
+    case X86::CALL64r:
+    case X86::CALL64r_NT:
+      //Don't need insert an extra pre-check for indirect calls, but we do need to
+      //go to the springboard before executing them.  The taint will be checked because
+      //addr had to loaded via a preceeding instruction into the register.
+
+      //If we decide to support doubly-indirect calls (i.e. calls that jump to the
+      //addr located at the addr store in the register) we'll need to insert an extra check.
+      break;
+    case X86::RETQ:
+      //Example of added code: 
+      // mov    (%rsp),%r14
+      //Because we're adding this early in our pass structure, the captureTaint pass
+      //will instrument 
+      InsertInstr(X86::MOV64rm, TASE_REG_TMP, &(*MII))
+	.addReg(X86::RSP)         // base
+	.addImm(1)                // scale
+	.addReg(X86::NoRegister)  // index
+	.addImm(0)      // offset
+	.addReg(X86::NoRegister);  // segment
+      
+      modified = true;
+      break;
+    case X86::TAILJMPr64:
+    case X86::TAILJMPr64_REX:
+    case X86::JMP64r:
+    case X86::JMP64r_NT:
+      //As long as these instructions aren't doubly-indirect, we shouldn't need an
+      //extra instrumentation instruction.  If we jump to the springboard before
+      //executing the jmp, we'll catch poison that was recorded earlier when the
+      //jump address was moved into the register.
+      break;
+    }
+  }
+  
+  return modified;
+  
+
+}
+
 
 //Split up paired control flow instructions into seperate cartridges
 //ex.
@@ -379,6 +453,13 @@ bool X86TASEDecorateCartridgePass::isLive(MachineBasicBlock *MBB, unsigned Reg) 
   }
   return false;
 }
+
+MachineInstrBuilder X86TASEDecorateCartridgePass::InsertInstr(unsigned int opcode, unsigned int destReg, MachineInstr * MI) {
+  return BuildMI(*MI->getParent(),
+		 MachineBasicBlock::instr_iterator(MI),
+		 MI->getDebugLoc(), TII->get(opcode), destReg);
+}
+
 
 INITIALIZE_PASS(X86TASEDecorateCartridgePass, PASS_KEY, PASS_DESC, false, false)
 
