@@ -430,3 +430,9 @@ let isCodeGenOnly = 1, hasSideEffects = 1 in {
                      [(X86brcond bb:$dst, X86_COND_NE, EFLAGS)]>, OpSize32, TB;
 
 }
+// TASE pseudo-jump 
+let isCodeGenOnly = 1, hasSideEffects = 1 in {
+  def TASE_JMP_4 : Ii32PCRel<0xE9, RawFrm, (outs), (ins brtarget32:$dst),
+                            "jmp\t$dst", []>, OpSize32;
+			    
+}

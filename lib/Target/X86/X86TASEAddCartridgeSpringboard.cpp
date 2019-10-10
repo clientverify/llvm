@@ -116,13 +116,20 @@ MCCartridgeRecord *X86TASEAddCartridgeSpringboardPass::EmitSpringboard(const cha
     .addSym(cartridge->Body())  // offset
     .addReg(X86::NoRegister);   // segment
   // Indirectly jump to the springboard.
-  InsertInstr(X86::TASE_JMP64m)
-    .addReg(X86::NoRegister)    // base
-    .addImm(1)                  // scale
-    .addReg(X86::NoRegister)    // index
-    .addExternalSymbol(label)   // offset
-    .addReg(X86::NoRegister);   // segment
+  //InsertInstr(X86::TASE_JMP64m)
+    //.addReg(X86::NoRegister)    // base
+    //.addImm(1)                  // scale
+    //.addReg(X86::NoRegister)    // index
+    //.addExternalSymbol(label)   // offset
+    //.addReg(X86::NoRegister);   // segment
 
+  //Directly jump to label.  Note that we use a special
+  //TASE jmp symbol in X86InstrControl.td because it is defined as a jump
+  //but NOT a branch/terminator.  This makes our calculations for cartridge
+  //offsets easier later on in X86AsmPrinter.cpp
+  InsertInstr(X86::TASE_JMP_4)
+    .addExternalSymbol(label);
+  
   //MachineInstr *cartridgeBodyPDMI = &firstMI;
   // DEBUG: Assert that we are in an RTM transaction to check springboard behavior.
   //MachineInstr *cartridgeBodyMI =
@@ -172,11 +179,11 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
   if (Analysis.isModeledFunction(MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Adding prolog to modeled function\n.");
     FirstMI = &MF.front().front();
-    EmitSpringboard("tase_model")->Modeled = true;
+    EmitSpringboard("sb_modeled")->Modeled = true;
   } else {
     for (MachineBasicBlock &MBB : MF) {
       FirstMI = &MBB.front();
-      EmitSpringboard("tase_springboard");
+      EmitSpringboard("sb_reopen");
     }
   }
   FirstMI = nullptr;

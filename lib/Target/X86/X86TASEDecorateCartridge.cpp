@@ -36,7 +36,7 @@ static cl::opt<bool, true> TASEParanoidControlFlowFlag(
     "x86-tase-paranoid-control-flow",
     cl::desc("Isolate indirect control flow transfers - rets and calls."),
     cl::location(TASEParanoidControlFlow),
-    cl::init(false));
+    cl::init(true));
 
 namespace llvm {
 
