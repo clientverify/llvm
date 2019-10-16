@@ -93,11 +93,12 @@ bool X86TASEDecorateCartridgePass::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "********** " << getPassName() << " : " << MF.getName()
                     << " **********\n");
 
+  /*
   if (Analysis.isModeledFunction(MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Function is modeled in the interpreter\n.");
     return false;
   }
-
+  */
   Subtarget = &MF.getSubtarget<X86Subtarget>();
   TII = Subtarget->getInstrInfo();
   TRI = Subtarget->getRegisterInfo();

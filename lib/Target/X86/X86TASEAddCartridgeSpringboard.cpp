@@ -178,8 +178,19 @@ bool X86TASEAddCartridgeSpringboardPass::runOnMachineFunction(MachineFunction &M
 
   if (Analysis.isModeledFunction(MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Adding prolog to modeled function\n.");
-    FirstMI = &MF.front().front();
-    EmitSpringboard("sb_modeled")->Modeled = true;
+    
+    //Add model trap to top of modeled functions
+    for (MachineBasicBlock &MBB : MF) {
+      FirstMI = &MBB.front();
+      if (FirstMI == &MF.front().front())
+	EmitSpringboard("sb_modeled");
+      else 
+	EmitSpringboard("sb_reopen");
+
+    }
+
+    //FirstMI = &MF.front().front();
+    //EmitSpringboard("sb_modeled")->Modeled = true;
   } else {
     for (MachineBasicBlock &MBB : MF) {
       FirstMI = &MBB.front();

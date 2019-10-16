@@ -723,7 +723,7 @@ void X86AsmPrinter::EmitTASECartridgeRecords() {
 
   for (MCCartridgeRecord *record : *records) {
     
-    if (record->Modeled) {
+    //if (record->Modeled) {
       
       /*
       MCSymbol *MR = record->ModeledRecord();
@@ -731,12 +731,13 @@ void X86AsmPrinter::EmitTASECartridgeRecords() {
       OutStreamer->EmitSymbolAttribute(MR, MCSA_ELF_TypeObject);
       OutStreamer->EmitLabel(MR);
       */
-    } else {
+      //} else {
+    
       OutStreamer->EmitSymbolValue(record->Cartridge(), 4);
       OutStreamer->emitAbsoluteSymbolDiff(record->Body(), record->Cartridge(), 2);
       OutStreamer->emitAbsoluteSymbolDiff(record->End(), record->Body(), 2);
-      OutStreamer->AddBlankLine();
-    }
+      OutStreamer->AddBlankLine(); 
+      //}
   }
 
   OutStreamer->AddComment("End of TASE Cartridge records");

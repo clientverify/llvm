@@ -91,11 +91,12 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "********** " << getPassName() << " : " << MF.getName()
                     << " **********\n");
 
+  /*
   if (Analysis.isModeledFunction(MF.getName())) {
     LLVM_DEBUG(dbgs() << "TASE: Function is modeled in the interpreter.\n");
     return false;
   }
-
+  */
   if (Analysis.getInstrumentationMode() == TIM_NONE) {
     LLVM_DEBUG(dbgs() << "TASE: Skipping instrumentation by requst.\n");
     return false;
