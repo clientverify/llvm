@@ -38,6 +38,14 @@ static cl::opt<bool, true> TASEParanoidControlFlowFlag(
     cl::location(TASEParanoidControlFlow),
     cl::init(true));
 
+int TASEMaxCartridgeSize;
+static cl::opt<int, true> TASEMaxCartridgeSizeFlag(
+						       "x86-tase-max-cartridge-size",
+						       cl::desc("Maximum number of x86 instructions (not including instrumentation) in a cartridge. -1 for none.  Will take into account extra instructions for paranoid control flow, if enabled."),
+						       cl::location(TASEMaxCartridgeSize),
+						       cl::init(50));
+
+
 namespace llvm {
 
 void initializeX86TASEDecorateCartridgePassPass(PassRegistry &);
@@ -78,6 +86,7 @@ private:
   bool SplitAtSpills(MachineBasicBlock &MBB);
   bool SplitAfterNonTerminatorFlow(MachineBasicBlock &MBB);
   bool SplitBeforeIndirectFlow(MachineBasicBlock &MBB);
+  bool SplitLargeBlocks(MachineBasicBlock &MBB);
   MachineInstrBuilder InsertInstr(unsigned int, unsigned int, MachineInstr*);
   bool InsertCheckBeforeIndirectFlow(MachineBasicBlock &MBB); 
   MachineBasicBlock *SplitBefore(MachineBasicBlock *MBB, MachineBasicBlock::iterator MII);
@@ -113,6 +122,11 @@ bool X86TASEDecorateCartridgePass::runOnMachineFunction(MachineFunction &MF) {
       for (MachineBasicBlock &MBB : MF) {
 	modified |= InsertCheckBeforeIndirectFlow(MBB);
       }
+    }
+
+    //Break up large Machine Basic Blocks
+    for (MachineBasicBlock &MBB : MF) {
+      modified |= SplitLargeBlocks(MBB);
     }
     
     // Do reverse analysis to break blocks at call boundaries.
@@ -264,6 +278,26 @@ bool X86TASEDecorateCartridgePass::SplitAfterNonTerminatorFlow(MachineBasicBlock
   
   return hasSplit;
   */
+}
+
+bool X86TASEDecorateCartridgePass::SplitLargeBlocks(MachineBasicBlock &MBB) {
+  bool modified = false;
+  int instCtr = 0;
+  MachineBasicBlock *pMBB = &MBB;
+  
+  for (auto MII = pMBB->instr_begin(); MII != pMBB->instr_end(); MII++) {
+    if (MII->isDebugInstr()) {
+      continue;
+    } else {
+      instCtr++;
+      if (instCtr == TASEMaxCartridgeSize) {
+	instCtr = 0;
+	modified = true;
+	pMBB = SplitBefore(pMBB, MachineBasicBlock::iterator(MII));
+	MII = pMBB->instr_begin();
+      }
+    }
+  }
 }
 
 bool X86TASEDecorateCartridgePass::SplitBeforeIndirectFlow(MachineBasicBlock &MBB) {
