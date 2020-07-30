@@ -28,6 +28,7 @@ using namespace llvm;
 #define DEBUG_TYPE PASS_KEY
 
 extern bool TASEParanoidControlFlow;
+extern bool TASEStackGuard;
 // STATISTIC(NumCondBranchesTraced, "Number of conditional branches traced");
 
 namespace llvm {
@@ -107,6 +108,98 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
   TII = Subtarget->getInstrInfo();
 //   TRI = Subtarget->getRegisterInfo();
 
+
+  if (TASEStackGuard) {
+    //Identify stackguard instructions and exempt them from instrumentation, as well as swap the canary value for our poison tag.
+    
+    //Assumption here is that a mov from %fs:0x28 is always going to uniquely identify loading the stackguard value,
+    //since the linux distributions and libc implementations we use initialize the stack canaray value there.
+    
+    //Ideally, we could insert our own intrinsic within CodeGen/StackProtector.cpp for TASE but that would need to be carefully
+    //written to survive all the LLVM instruction selection/scheduling and register allocation passes.
+    for (MachineBasicBlock &MBB : MF) {
+      for (MachineInstr &MI : MBB.instrs()) { 
+	if (MI.getOpcode() == X86::MOV64rm) {
+	  if (MI.getNumOperands() >= 6) {
+	    MachineOperand m = MI.getOperand(5);
+	    if (m.isReg()) {
+	      if (m.getReg() == X86::FS) {
+
+		MachineOperand off = MI.getOperand(4);
+		if (off.getImm() == 0x28) {
+		  printf("See 0x28 offset to fs.  Identified stack canary load. \n");
+	      
+		  MI.SkipInTASE = true;
+		  MachineBasicBlock::instr_iterator NextMIItr = std::next(MachineBasicBlock::instr_iterator(MI));
+
+		  //Instrument the write in the prologue in case the stack guard slot used to be a local symbolic variable.
+		  //Don't instrument the load from the stack slot in the epilogue because TASE will already have caught
+		  //reads from or writes to the stackguard slot in the body of the function via our standard instrumentation,
+		  //and instrumenting the epilogue would always force a trap into TASE.
+		  if (NextMIItr->mayLoad()) {
+		    NextMIItr->SkipInTASE = true;
+
+		  
+		  }
+		
+		  //Clobber fs load into dest register with poison.  We do this in the prologue before writing
+		  //the instruction to store the canary value in the stackguard slot happens, and in the epilogue
+		  //when we're loading the original canary value to determine if it has been modified.	     
+		  //Todo -- Should we be using a different DebugLoc?
+		  MachineInstrBuilder MIB = BuildMI(*MI.getParent(), NextMIItr, MI.getDebugLoc(), TII->get(X86::MOV64ri), MI.getOperand(0).getReg());
+		  MIB.addImm(0xDEAD000000000000); //dead
+		  MIB.getInstr()->SkipInTASE = true;
+		  //Wipe the poison-handling reg if we're in the prologue.  Otherwise interpreter will
+		  //get stuck with poison in reg.
+		  if (NextMIItr->mayStore() ) {
+		    MachineInstrBuilder ZeroReg = BuildMI(*MI.getParent(), std::next(NextMIItr), MI.getDebugLoc(), TII->get(X86::MOV64ri), MI.getOperand(0).getReg());
+		    ZeroReg.addImm(0x0000000000000000);
+		    ZeroReg->SkipInTASE = true;
+		  }
+		  //Wipe the stack protector slot if we're in the epilogue.
+		  //Also wipe both registers used in the cmp because they'll have poison.
+		  if (NextMIItr->mayLoad()) {
+		    //Use our tase temp register for the stack guard slot wipe
+		    MachineBasicBlock::instr_iterator CmpMIItr = std::next(NextMIItr);
+		    MachineBasicBlock::instr_iterator JmpMIItr = std::next(CmpMIItr);
+		    //Should be safe to clobber reg that was used for loading the fs-based canary value.
+		    //Wipes the taint from the reg as a side effect.
+		    //TODO: Double check
+		    MachineInstrBuilder MIBWipeLoad = BuildMI(*(CmpMIItr->getParent()), JmpMIItr, MI.getDebugLoc(), TII->get(X86::MOV64ri), MI.getOperand(0).getReg());
+		    MIBWipeLoad.addImm(0x0000000000000000);
+		    MIBWipeLoad->SkipInTASE= true;
+
+		    //Actually write into the stack guard slot.  Operand to access the guard slot might always be (%rsp), but in
+		    //case it's not we grab the full memory operand form from the load instr.
+		    int addrOffset = X86II::getMemoryOperandNo(NextMIItr->getDesc().TSFlags);                                                                                                           // addrOffset is -1 if we failed to find the operand.
+		    assert(addrOffset >= 0 && "TASE: Unable to determine instruction memory operand!");                                                                                                addrOffset += X86II::getOperandBias(NextMIItr->getDesc());
+		  
+		    MachineInstrBuilder MIBWipeStore = BuildMI(*(CmpMIItr->getParent()), JmpMIItr, MI.getDebugLoc(), TII->get(X86::MOV64mr));
+		  
+		    for (int i = 0; i < X86::AddrNumOperands; i++) {
+		      MIBWipeStore.addAndUse(NextMIItr->getOperand(addrOffset + i));
+		    }
+		    MIBWipeStore.addReg(MIBWipeLoad->getOperand(0).getReg());
+		    MIBWipeStore->SkipInTASE = true;
+
+		    //Wipe the reg that read the canary value from the stack
+		    MachineInstrBuilder MIBWipeReg = BuildMI(*(CmpMIItr->getParent()), JmpMIItr, MI.getDebugLoc(), TII->get(X86::MOV64ri), NextMIItr->getOperand(0).getReg());
+		    MIBWipeReg.addImm(0x0000000000000000);
+		    MIBWipeReg->SkipInTASE = true;
+		    
+		    //Need to be careful with removing (rather than erasing/deleting) the FS load because we've copied its operands.
+		    //MI.removeFromParent();
+		  }	
+		}
+	      }
+	    }
+	  }
+	}
+      }
+    }
+  } //End TASE Stack guard logic---------------
+
+  
   bool modified = false;
   for (MachineBasicBlock &MBB : MF) {
     LLVM_DEBUG(dbgs() << "TASE: Analyzing taint for block " << MBB);
@@ -119,6 +212,10 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
     // one inserts into the list.
     for (MachineInstr &MI : MBB.instrs()) {
       LLVM_DEBUG(dbgs() << "TASE: Analyzing taint for " << MI);
+      if (MI.SkipInTASE) {
+	continue;
+      }
+
       if (Analysis.isSpecialInlineAsm(MI)) {
         continue;
       }
@@ -138,6 +235,10 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
         errs() << "TASE: An instruction with potentially unwanted side-effects is emitted. " << MI;
         continue;
       }
+      if (!Analysis.isMemInstr(MI.getOpcode() )) {
+	  MI.dump();
+      }
+      
       assert(Analysis.isMemInstr(MI.getOpcode()) && "TASE: Encountered an instruction we haven't handled.");
       InstrumentInstruction(MI);
       modified = true;
@@ -152,6 +253,7 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
 void X86TASECaptureTaintPass::InstrumentInstruction(MachineInstr &MI) {
   CurrentMI = &MI;
   NextMII = std::next(MachineBasicBlock::instr_iterator(MI));
+    
   size_t size = Analysis.getMemFootprint(MI.getOpcode());
   switch (MI.getOpcode()) {
     default:

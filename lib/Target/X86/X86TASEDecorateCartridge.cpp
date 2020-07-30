@@ -38,6 +38,13 @@ static cl::opt<bool, true> TASEParanoidControlFlowFlag(
     cl::location(TASEParanoidControlFlow),
     cl::init(true));
 
+bool TASEStackGuard;
+static cl::opt<bool, true> TASEStackGuardFlag(
+    "x86-tase-stack-guard",
+    cl::desc("Add stack guard check for TASE using the poison value."),
+    cl::location(TASEStackGuard),
+    cl::init(false));
+
 int TASEMaxCartridgeSize;
 static cl::opt<int, true> TASEMaxCartridgeSizeFlag(
 						       "x86-tase-max-cartridge-size",
@@ -298,6 +305,7 @@ bool X86TASEDecorateCartridgePass::SplitLargeBlocks(MachineBasicBlock &MBB) {
       }
     }
   }
+  return modified;//Is this used anywhere?
 }
 
 bool X86TASEDecorateCartridgePass::SplitBeforeIndirectFlow(MachineBasicBlock &MBB) {
