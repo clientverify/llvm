@@ -78,6 +78,8 @@ public:
   };
 
   bool SkipInTASE = false;  //Added for TASE to ignore stack protection instructions
+  bool MustBeTASEAligned = false; //Added for TASE to omit alignment checks during
+  //poison checking operations if we can safely statically assume 2-byte alignment
   
   enum MIFlag {
     NoFlags      = 0,

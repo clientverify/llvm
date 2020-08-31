@@ -29,6 +29,7 @@ using namespace llvm;
 
 extern bool TASEParanoidControlFlow;
 extern bool TASEStackGuard;
+extern bool TASEUseAlignment;
 // STATISTIC(NumCondBranchesTraced, "Number of conditional branches traced");
 
 namespace llvm {
@@ -109,7 +110,42 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
 //   TRI = Subtarget->getRegisterInfo();
 
 
+
+
+  if (TASEUseAlignment) {
+
+    for (MachineBasicBlock &MBB : MF) {
+      for (MachineInstr &MI : MBB.instrs()) {
+	if (MI.getOpcode() == X86::MOV64rm) {
+	  if (MI.getNumOperands() >= 6) {
+	    MachineOperand m = MI.getOperand(1);
+	    if (m.isReg()) {
+	      if (m.getReg() == X86::RSP ) {
+		//printf("See stack relative load: \n");
+		//MI.MustBeTASEAligned = true;
+		//MI.dump();	
+	      }
+	    }
+	  }
+	}
+	if (MI.getOpcode() == X86::MOV64mr || MI.getOpcode() == X86::MOV64mi32) {
+	  MachineOperand m = MI.getOperand(0);
+	  if (m.isReg()) {
+	    if (m.getReg() == X86::RSP ) {
+	      //printf("See stack relative store inst: \n");
+	      //MI.dump();
+	      //MI.MustBeTASEAligned = true;
+	    }
+	  }
+	}
+      }
+    }
+
+  }
+  
   if (TASEStackGuard) {
+
+    
     //Identify stackguard instructions and exempt them from instrumentation, as well as swap the canary value for our poison tag.
     
     //Assumption here is that a mov from %fs:0x28 is always going to uniquely identify loading the stackguard value,
@@ -117,6 +153,9 @@ bool X86TASECaptureTaintPass::runOnMachineFunction(MachineFunction &MF) {
     
     //Ideally, we could insert our own intrinsic within CodeGen/StackProtector.cpp for TASE but that would need to be carefully
     //written to survive all the LLVM instruction selection/scheduling and register allocation passes.
+
+
+    
     for (MachineBasicBlock &MBB : MF) {
       for (MachineInstr &MI : MBB.instrs()) { 
 	if (MI.getOpcode() == X86::MOV64rm) {
@@ -421,7 +460,24 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
   } else {
     // Precalculate the address, align it to a two byte boundary and then
     // read double the size just to be safe.
-    size *= 2;
+
+    
+    if (CurrentMI->memoperands_begin()  && TASEUseAlignment && CurrentMI->hasOneMemOperand() && size > 1) {
+      //assert(CurrentMI->hasOneMemOperand() && "TASE: Machine Inst has more than 1 mem operand");
+      
+      llvm::MachineMemOperand* const mmo = *(CurrentMI->memoperands_begin());
+      unsigned alignment = mmo->getAlignment();
+      //printf("Memop alignment is %u \n", alignment);
+      if ( (alignment % 2 ) != 1) {
+	CurrentMI->MustBeTASEAligned = true;
+      }
+      
+    }
+
+  
+    if (!CurrentMI->MustBeTASEAligned) {
+      size *= 2;
+    }
     // If this address operand is just a register, we can skip the lea. But don't do this if
     // EFLAGS is dead and we want to not emit shrx.
     unsigned int AddrReg = getAddrReg(addrOffset);
@@ -434,19 +490,21 @@ void X86TASECaptureTaintPass::PoisonCheckMem(size_t size) {
         MIB.addAndUse(CurrentMI->getOperand(addrOffset + i));
       }
     }
+
+
     if (eflags_dead) {
       assert(AddrReg == TASE_REG_TMP);
       InsertInstr(X86::SHR64r1, TASE_REG_TMP)
-        .addReg(TASE_REG_TMP);
+	.addReg(TASE_REG_TMP);
     } else {
       // Use TASE_REG_RET as a temporary register to hold offsets/indices.
       InsertInstr(X86::MOV32ri, getX86SubSuperRegister(TASE_REG_RET, 4 * 8))
-        .addImm(1);
+	.addImm(1);
       InsertInstr(X86::SHRX64rr, TASE_REG_TMP)
-        .addReg(AddrReg)
-        .addReg(TASE_REG_RET);
+	.addReg(AddrReg)
+	.addReg(TASE_REG_RET);
     }
-
+    
     MOs.push_back(MachineOperand::CreateReg(TASE_REG_TMP, false));     // base
     MOs.push_back(MachineOperand::CreateImm(1));                       // scale
     MOs.push_back(MachineOperand::CreateReg(TASE_REG_TMP, false));     // index

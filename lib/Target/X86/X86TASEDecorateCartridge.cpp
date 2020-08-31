@@ -45,6 +45,14 @@ static cl::opt<bool, true> TASEStackGuardFlag(
     cl::location(TASEStackGuard),
     cl::init(false));
 
+bool TASEUseAlignment;
+static cl::opt<bool, true> TASEUseAlignmentFlag(
+    "x86-tase-use-alignment",
+    cl::desc("Use static alignment info to simplify TASE poison checks"),
+    cl::location(TASEUseAlignment),
+    cl::init(false));
+
+
 int TASEMaxCartridgeSize;
 static cl::opt<int, true> TASEMaxCartridgeSizeFlag(
 						       "x86-tase-max-cartridge-size",
